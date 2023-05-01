@@ -1,0 +1,30 @@
+{
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        "rust-analyzer.check.command": "clippy",
+        "editor.formatOnSave": true,
+    },
+    "launch": {
+        "configurations": [
+            {
+                "type": "lldb",
+                "request": "launch",
+                "name": "Debug selected unit test",
+                "cargo": {
+                    "args": [
+                        "test",
+                        "--no-run",
+                    ]
+                },
+                "args": [
+                    "${selectedText}"
+                ],
+                "cwd": "${workspaceFolder}"
+            },
+        ]
+    }
+}

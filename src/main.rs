@@ -19,22 +19,22 @@ struct HardwareConfig<'a> {
     parallel: usize,
 }
 
-#[get("/")]
-fn index() -> Template {
-    Template::render("index", &Context::default())
+#[get("/config")]
+fn config() -> Template {
+    Template::render("config", &Context::default())
 }
 
 // NOTE: We use `Contextual` here because we want to collect all submitted form
 // fields to re-render forms with submitted values on error. If you have no such
 // need, do not use `Contextual`. Use the equivalent of `Form<Submit<'_>>`.
-#[post("/", data = "<form>")]
-fn submit<'r>(form: Form<Contextual<'r, HardwareConfig<'r>>>) -> (Status, Template) {
+#[post("/config", data = "<form>")]
+fn submit_config<'r>(form: Form<Contextual<'r, HardwareConfig<'r>>>) -> (Status, Template) {
     let template = match form.value {
         Some(ref submission) => {
             println!("submission: {:#?}", submission);
-            Template::render("index", &form.context)
+            Template::render("config", &form.context)
         }
-        None => Template::render("index", &form.context),
+        None => Template::render("config", &form.context),
     };
 
     (form.context.status(), template)
@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, mut rx) = broadcast::channel::<i8>(10);
 
     let rocket = rocket::build()
-        .mount("/", routes![index, submit])
+        .mount("/", routes![config, submit_config])
         .attach(Template::fairing())
         .ignite()
         .await?

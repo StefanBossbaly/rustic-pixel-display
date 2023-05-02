@@ -10,12 +10,24 @@ use tokio::join;
 use tokio::sync::broadcast;
 
 #[derive(Debug, FromForm)]
+#[allow(dead_code)]
 struct HardwareConfig<'a> {
+    #[field(validate = one_of(["AdafruitHat", "AdafruitHatPwm", "Regular", "RegularPi1", "Classic", "ClassicPi1"]), default="Regular")]
     hardware_mapping: &'a str,
+
+    #[field(validate = range(1..), default = 64)]
     rows: usize,
+
+    #[field(validate = range(1..), default = 64)]
     cols: usize,
+
+    #[field(validate = range(1..), default = 120)]
     refresh_rate: usize,
+
+    #[field(validate = range(1..), default = 1)]
     chain_length: usize,
+
+    #[field(validate = range(1..), default = 1)]
     parallel: usize,
 }
 
@@ -42,7 +54,7 @@ fn submit_config<'r>(form: Form<Contextual<'r, HardwareConfig<'r>>>) -> (Status,
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (tx, mut rx) = broadcast::channel::<i8>(10);
+    let (_tx, mut rx) = broadcast::channel::<i8>(10);
 
     let rocket = rocket::build()
         .mount("/", routes![config, submit_config])

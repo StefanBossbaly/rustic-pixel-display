@@ -17,7 +17,7 @@ use std::thread;
 type SharedMatrixConfig = Arc<Mutex<Option<RGBMatrixConfig>>>;
 
 pub struct LedDriver {
-    handle: Option<thread::JoinHandle<()>>,
+    thread_handle: Option<thread::JoinHandle<()>>,
     alive: Arc<AtomicBool>,
     pending_matrix_config: SharedMatrixConfig,
 }
@@ -25,7 +25,7 @@ pub struct LedDriver {
 impl LedDriver {
     pub fn new() -> Self {
         LedDriver {
-            handle: None,
+            thread_handle: None,
             alive: Arc::new(AtomicBool::new(false)),
             pending_matrix_config: Arc::new(Mutex::new(None)),
         }
@@ -46,7 +46,7 @@ impl LedDriver {
         let alive = self.alive.clone();
         let pending_matrix_config = self.pending_matrix_config.clone();
 
-        self.handle = Some(thread::spawn(move || {
+        self.thread_handle = Some(thread::spawn(move || {
             while alive.load(Ordering::SeqCst) {
                 // Update the configuration, if necessary
                 {
@@ -71,5 +71,20 @@ impl LedDriver {
                 canvas = matrix.update_on_vsync(canvas);
             }
         }));
+    }
+}
+
+impl Drop for LedDriver {
+    fn drop(&mut self) {
+        let Self {
+            thread_handle,
+            alive,
+            ..
+        } = self;
+
+        if let Some(thread_handle) = thread_handle.take() {
+            alive.store(false, Ordering::SeqCst);
+            thread_handle.join().expect("Failed to join thread");
+        }
     }
 }

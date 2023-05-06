@@ -5,7 +5,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width">
-    <title>Configuration</title>
+    <title>RGB Matrix Configuration</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css"> 
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
     <style>
@@ -18,7 +18,7 @@
   </head>
   <body>
     <div class="container">
-      <h1>Configuration</h1>
+      <h1>RGB Matrix Configuration</h1>
 
       {% if errors | length > 1 %}
           <small class="text-error" style="margin-top: -20px">
@@ -28,22 +28,79 @@
 
       <form action="/config" method="post" enctype="multipart/form-data">
         {{
-            m::select(
-                label="Hardware Mapping",
-                name="hardware_mapping",
-                options=["AdafruitHat", "AdafruitHatPwm", "Regular", "RegularPi1", "Classic", "ClassicPi1"]
-            )
+          m::select(
+            label="Hardware Mapping",
+            name="hardware_mapping",
+            options=["AdafruitHat", "AdafruitHatPwm", "Regular", "RegularPi1", "Classic", "ClassicPi1"]
+          )
         }}
 
-        {{ m::input(label="Rows", type="number", name="rows") }}
+        {{ m::input(label="Rows", name="rows", type="number") }}
 
-        {{ m::input(label="Cols", type="number", name="cols") }}
+        {{ m::input(label="Cols", name="cols", type="number") }}
 
-        {{ m::input(label="Refresh Rate", type="number", name="refresh_rate") }}
+        {{ m::input(label="Refresh Rate", name="refresh_rate", type="number") }}
 
-        {{ m::input(label="Chain Length", type="number", name="chain_length") }}
+        {{
+          m::select(
+            label="Raspberry Pi Chip",
+            name="pi_chip",
+            options=["Automatic", "BCM2708", "BCM2835", "BCM2709", "BCM2836", "BCM2837", "BCM2711"]
+          )
+        }}
 
-        {{ m::input(label="Parallel", type="number", name="parallel") }}
+        {{ m::input(label="PWM Bits", name="pwm_bits", type="number" ) }}
+
+        {{ m::input(label="PWM LSB Nanoseconds", name="pwm_lsb_nanoseconds", type="number") }}
+
+        {{ m::input(label="Slowdown", name="slowdown", type="number") }}
+
+        {{
+          m::select(
+            label="Interlaced",
+            name="interlaced",
+            options=["True", "False"]
+          )
+        }}
+
+        {{ m::input(label="Dither Bits", name="dither_bits", type="number") }}
+
+        {{ m::input(label="Chain Length", name="chain_length", type="number") }}
+
+        {{ m::input(label="Parallel", name="parallel", type="number") }}
+
+        {{
+          m::select(
+            label="Panel Type",
+            name="panel_type",
+            options=["None", "FM6126", "FM6127"]
+          )
+        }}
+
+        {{
+          m::select("abcshiftregister", "sm5266"]
+          )
+            options=["None", "Stripe", "Checkered", "Spiral", "ZStripe08", "ZStripe44", "ZStripe80", "Coreman", "Kaler2Scan",
+              "P10Z", "QiangLiQ8", "InversedZStripe", "P10Outdoor1R1G1B1", "P10Outdoor1R1G1B2", "P10Outdoor1R1G1B3", "P10Coreman",
+              "P8Outdoor1R1G1B", "FlippedStripe", "P10Outdoor32x16HalfScan"]
+          )
+        }}
+
+        {{
+          m::select(
+            label="Row Setter",
+            name="row_setter",
+            options=["direct", "shiftregister", "directabcdline", "abcshiftregister", "sm5266"]
+          )
+        }}
+
+        {{
+          m::select(
+            label="LED Sequence",
+            name="led_sequence",
+            options=["rgb", "rbg", "grb", "gbr", "brg", "bgr"]
+          )
+        }}
 
         <div class="form-group row">
           <div class="offset-4 col-8">

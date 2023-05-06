@@ -42,17 +42,22 @@
 {% endmacro input %}
 
 {% macro checkbox(name, label, value="yes") %}
-    <label {% if name in errors %} class="bd-error" {% endif %}>
-    <input type="checkbox" name="{{ name }}" value={{ value }}
-    {% if name in values %}
+  <div class="form-group row">
+    <label for="{{ name }}" class="col-4 col-form-label">{{ label }}</label>
+    <div class="col-8">
+      <input type="checkbox"
+             class="form-check-input"
+             name="{{ name }}"
+             id="{{ name }}"
+      {% if name in values %}
         {% set field_values = values | get(key=name) %}
         {% if field_values is containing(value) %}
             checked
         {% endif %}
-    {% endif %}
-    >
-        {{ label }}
-    </label>
+      {% endif %}
+      />
+    </div>
+  </div>
 {% endmacro input %}
 
 {% macro textarea(label, name, placeholder="", max=250) %}

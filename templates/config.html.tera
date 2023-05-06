@@ -78,8 +78,9 @@
         }}
 
         {{
-          m::select("abcshiftregister", "sm5266"]
-          )
+          m::select(
+            label="Multiplexing",
+            name="multiplexing",
             options=["None", "Stripe", "Checkered", "Spiral", "ZStripe08", "ZStripe44", "ZStripe80", "Coreman", "Kaler2Scan",
               "P10Z", "QiangLiQ8", "InversedZStripe", "P10Outdoor1R1G1B1", "P10Outdoor1R1G1B2", "P10Outdoor1R1G1B3", "P10Coreman",
               "P8Outdoor1R1G1B", "FlippedStripe", "P10Outdoor32x16HalfScan"]

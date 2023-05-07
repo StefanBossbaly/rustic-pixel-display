@@ -1,13 +1,16 @@
-#[macro_use]
-extern crate rocket;
-
 use led_driver::LedDriver;
 use rpi_led_panel::{HardwareMapping, LedSequence, RGBMatrixConfig, RowAddressSetterType};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+#[cfg(feature = "http_server")]
 mod http_server;
+
+#[cfg(feature = "http_server")]
+#[macro_use]
+extern crate rocket;
+
 mod led_driver;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -67,8 +70,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         led_sequence: LedSequence::Rgb,
     });
 
+    #[cfg(feature = "http_server")]
     let led_driver = Arc::new(Mutex::new(led_driver));
 
+    #[cfg(feature = "http_server")]
     http_server::build_rocket(led_driver)
         .ignite()
         .await?

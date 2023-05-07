@@ -63,7 +63,7 @@ impl LedDriver {
 
                 let text = Text::with_alignment(
                     "Hello\nWorld",
-                    Point::new(0, 0),
+                    Point::new(64, 32),
                     MonoTextStyle::new(&FONT_6X10, Rgb888::WHITE),
                     Alignment::Center,
                 );

@@ -2,13 +2,10 @@ use rocket::form::{Context, Contextual, Form, FromForm};
 use rocket::http::Status;
 use rocket::{Build, Rocket, State};
 use rocket_dyn_templates::Template;
-use rpi_led_panel::{
-    HardwareMapping, LedSequence, MultiplexMapperType, PanelType, PiChip, RGBMatrixConfig,
-    RowAddressSetterType,
-};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
+use crate::config;
 use crate::led_driver::LedDriver;
 
 #[derive(Debug, FromForm)]
@@ -65,18 +62,18 @@ struct HardwareConfigForm<'a> {
     led_sequence: &'a str,
 }
 
-impl<'a> TryFrom<&HardwareConfigForm<'a>> for RGBMatrixConfig {
+impl<'a> TryFrom<&HardwareConfigForm<'a>> for config::HardwareConfig {
     type Error = Box<dyn std::error::Error>;
 
     fn try_from(form: &HardwareConfigForm<'a>) -> Result<Self, Self::Error> {
         Ok(Self {
-            hardware_mapping: HardwareMapping::from_str(form.hardware_mapping)?,
+            hardware_mapping: config::HardwareMapping::from_str(form.hardware_mapping)?,
             rows: form.rows,
             cols: form.cols,
             refresh_rate: form.refresh_rate,
             pi_chip: match form.pi_chip {
                 "Automatic" => None,
-                _ => Some(PiChip::from_str(form.pi_chip)?),
+                _ => Some(config::PiChip::from_str(form.pi_chip)?),
             },
             pwm_bits: form.pwm_bits,
             pwm_lsb_nanoseconds: form.pwm_lsb_nanoseconds,
@@ -87,14 +84,14 @@ impl<'a> TryFrom<&HardwareConfigForm<'a>> for RGBMatrixConfig {
             parallel: form.parallel,
             panel_type: match form.panel_type {
                 "None" => None,
-                _ => Some(PanelType::from_str(form.panel_type)?),
+                _ => Some(config::PanelType::from_str(form.panel_type)?),
             },
             multiplexing: match form.multiplexing {
                 "None" => None,
-                _ => Some(MultiplexMapperType::from_str(form.multiplexing)?),
+                _ => Some(config::MultiplexMapperType::from_str(form.multiplexing)?),
             },
-            row_setter: RowAddressSetterType::from_str(form.row_setter)?,
-            led_sequence: LedSequence::from_str(form.led_sequence)?,
+            row_setter: config::RowAddressSetterType::from_str(form.row_setter)?,
+            led_sequence: config::LedSequence::from_str(form.led_sequence)?,
         })
     }
 }
@@ -106,9 +103,6 @@ fn configuration() -> Template {
 
 struct DriverState(Arc<Mutex<LedDriver>>);
 
-// NOTE: We use `Contextual` here because we want to collect all submitted form
-// fields to re-render forms with submitted values on error. If you have no such
-// need, do not use `Contextual`. Use the equivalent of `Form<Submit<'_>>`.
 #[post("/config", data = "<form>")]
 fn submit_configuration<'r>(
     form: Form<Contextual<'r, HardwareConfigForm<'r>>>,

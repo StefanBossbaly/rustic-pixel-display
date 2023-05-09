@@ -62,6 +62,40 @@ struct HardwareConfigForm<'a> {
     led_sequence: &'a str,
 }
 
+impl<'a> TryFrom<&'a config::HardwareConfig> for HardwareConfigForm<'a> {
+    type Error = Box<dyn std::error::Error>;
+
+    fn try_from(config: &'a config::HardwareConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
+            hardware_mapping: config.hardware_mapping.as_ref(),
+            rows: config.rows,
+            cols: config.cols,
+            refresh_rate: config.refresh_rate,
+            pi_chip: match &config.pi_chip {
+                Some(pi_chip) => pi_chip.as_ref(),
+                None => "Automatic",
+            },
+            pwm_bits: config.pwm_bits,
+            pwm_lsb_nanoseconds: config.pwm_lsb_nanoseconds,
+            slowdown: config.slowdown.unwrap_or(0),
+            interlaced: if config.interlaced { "True" } else { "False" },
+            dither_bits: config.dither_bits,
+            chain_length: config.chain_length,
+            parallel: config.parallel,
+            panel_type: match &config.panel_type {
+                Some(panel_type) => panel_type.as_ref(),
+                None => "None",
+            },
+            multiplexing: match &config.multiplexing {
+                Some(multiplexing) => multiplexing.as_ref(),
+                None => "None",
+            },
+            row_setter: config.row_setter.as_ref(),
+            led_sequence: config.led_sequence.as_ref(),
+        })
+    }
+}
+
 impl<'a> TryFrom<&HardwareConfigForm<'a>> for config::HardwareConfig {
     type Error = Box<dyn std::error::Error>;
 
@@ -113,8 +147,9 @@ fn submit_configuration<'r>(
             println!("submission: {:#?}", submission);
 
             let new_config = submission.try_into().expect("Bad conversion");
-            let mut lock = driver_state.0.lock().expect("lock shared data");
-            lock.update_config(new_config);
+            let mut lock = driver_state.0.lock().expect("Poisoned mutex");
+            lock.update_config(new_config)
+                .expect("Could not update config");
 
             Template::render("config", &form.context)
         }

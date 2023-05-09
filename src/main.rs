@@ -1,5 +1,5 @@
+use anyhow::Result;
 use led_driver::LedDriver;
-
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -14,9 +14,9 @@ mod config;
 mod led_driver;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     let mut led_driver = LedDriver::new();
-    led_driver.start();
+    led_driver.start()?;
 
     #[cfg(feature = "http_server")]
     let led_driver = Arc::new(Mutex::new(led_driver));

@@ -1,4 +1,5 @@
 use crate::config;
+use anyhow::{anyhow, Context, Ok, Result};
 use embedded_graphics::{
     mono_font::{ascii::FONT_7X13_BOLD, MonoTextStyle},
     pixelcolor::Rgb888,
@@ -25,12 +26,14 @@ struct ConfigHolder {
 }
 
 pub struct LedDriver {
-    thread_handle: Option<thread::JoinHandle<()>>,
+    thread_handle: Option<thread::JoinHandle<Result<()>>>,
     alive: Arc<AtomicBool>,
     configs: Arc<Mutex<ConfigHolder>>,
 }
 
 impl LedDriver {
+    const CONFIG_FILE: &'static str = "led-statusboard.yaml";
+
     pub fn new() -> Self {
         LedDriver {
             thread_handle: None,
@@ -42,74 +45,88 @@ impl LedDriver {
         }
     }
 
-    pub(crate) fn update_config(&mut self, config: config::HardwareConfig) {
-        self.write_config(&config);
+    pub(crate) fn update_config(&mut self, config: config::HardwareConfig) -> Result<()> {
+        self.write_config(&config)?;
 
-        let mut configs = self.configs.lock().expect("Mutex failed");
+        let mut configs = self
+            .configs
+            .lock()
+            .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
         configs.pending_config = Some(config);
+
+        Ok(())
     }
 
-    pub(crate) fn get_config(&self) -> Option<config::HardwareConfig> {
-        let configs = self.configs.lock().expect("Mutex failed");
-        configs.current_config.clone()
+    pub(crate) fn get_config(&self) -> Result<Option<config::HardwareConfig>> {
+        let configs = self
+            .configs
+            .lock()
+            .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
+        Ok(configs.current_config.clone())
     }
 
-    fn read_config(&self) -> Result<config::HardwareConfig, Box<dyn std::error::Error>> {
-        let home_dir = std::env::var("HOME").expect("Failed to find the HOME environment variable");
+    fn get_config_file(&self) -> Result<File> {
+        let home_dir = std::env::var("HOME").context("Can not load HOME environment variable")?;
         let mut file_path = PathBuf::from(home_dir);
-        file_path.push("led-statusboard.yaml");
-        let file = File::open(file_path)?;
-        let file_reader = BufReader::new(file);
-        Ok(serde_yaml::from_reader(file_reader)?)
+        file_path.push(Self::CONFIG_FILE);
+        Ok(File::open(file_path)
+            .with_context(|| format!("Failed to open file {}", Self::CONFIG_FILE))?)
     }
 
-    fn write_config(&self, config: &config::HardwareConfig) {
-        let home_dir = std::env::var("HOME").expect("Failed to find the HOME environment variable");
-        let mut file_path = PathBuf::from(home_dir);
-        file_path.push("led-statusboard.yaml");
-        let file = File::create(file_path).expect("Unable to create file");
-        let file_writer = BufWriter::new(file);
-        serde_yaml::to_writer(file_writer, config).expect("Could not write to YAML file");
+    fn read_config(&self) -> Result<config::HardwareConfig> {
+        let file_reader = BufReader::new(self.get_config_file()?);
+        Ok(serde_yaml::from_reader(file_reader).context("Unable to parse YAML file")?)
     }
 
-    pub fn start(&mut self) {
-        // Attempt to load the configuration
-        self.alive.store(true, Ordering::SeqCst);
+    fn write_config(&self, config: &config::HardwareConfig) -> Result<()> {
+        let file_writer = BufWriter::new(self.get_config_file()?);
+        serde_yaml::to_writer(file_writer, config).context("Could not write to YAML file")?;
+        Ok(())
+    }
 
+    pub fn start(&mut self) -> Result<()> {
         // Clone variable that will be moved into the thread
         let alive = self.alive.clone();
         let configs = self.configs.clone();
 
         // Attempt to read the configuration
-        match self.read_config() {
-            Ok(config) => {
-                println!("Loaded config: {:#?}", config);
-                let mut configs = configs.lock().expect("Mutex failed");
-                configs.pending_config = Some(config);
-            }
-            Err(e) => {
-                println!("Failed to load config: {:#?}", e);
-            }
-        }
+        let file_config = self.read_config()?;
+        println!("Loaded config from file: {:#?}", file_config);
 
-        self.thread_handle = Some(thread::spawn(move || {
+        // Populate the configuration
+        {
+            let mut configs_unlock = configs
+                .lock()
+                .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
+            configs_unlock.pending_config = Some(file_config);
+        } // drop(configs_unlock)
+
+        // Mark the thread as active
+        self.alive.store(true, Ordering::SeqCst);
+
+        self.thread_handle = Some(thread::spawn(move || -> Result<()> {
             let mut matrix: Option<RGBMatrix> = None;
             let mut canvas: Option<Box<Canvas>> = None;
 
             while alive.load(Ordering::SeqCst) {
                 // Update the configuration, if necessary
-                let mut configs = configs.lock().expect("Mutex failed");
-                if let Some(new_config) = configs.pending_config.take() {
+                let mut configs_unlock = configs
+                    .lock()
+                    .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
+
+                if let Some(new_config) = configs_unlock.pending_config.take() {
                     println!("Updating config: {:#?}", new_config);
 
                     // Update the current config
-                    configs.current_config = Some(new_config.clone());
+                    configs_unlock.current_config = Some(new_config.clone());
 
                     // Convert into RGBMatrixConfig
-                    let hardware_config = new_config.try_into().expect("Invalid config");
+                    let hardware_config = new_config
+                        .try_into()
+                        .map_err(|e| anyhow!("Can't convert to RGBMatrixConfig {:?}", e))?;
 
-                    let result =
-                        RGBMatrix::new(hardware_config, 0).expect("Matrix initialization failed");
+                    let result = RGBMatrix::new(hardware_config, 0)
+                        .context("Invalid configuration provided")?;
                     (matrix, canvas) = (Some(result.0), Some(result.1));
                 }
 
@@ -124,13 +141,18 @@ impl LedDriver {
                     );
 
                     text.draw(canvas_ref.as_mut()).unwrap();
-                    canvas = Some(matrix.update_on_vsync(canvas_ref.clone()));
+                    canvas = Some(matrix.update_on_vsync(canvas_ref));
                     println!("Updated canvas")
                 } else {
+                    matrix = None;
                     canvas = None;
                 }
             }
+
+            Ok(())
         }));
+
+        Ok(())
     }
 }
 
@@ -144,7 +166,10 @@ impl Drop for LedDriver {
 
         if let Some(thread_handle) = thread_handle.take() {
             alive.store(false, Ordering::SeqCst);
-            thread_handle.join().expect("Failed to join thread");
+            thread_handle
+                .join()
+                .expect("Failed to join thread")
+                .expect("Thread encountered an error");
         }
     }
 }

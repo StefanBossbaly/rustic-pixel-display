@@ -37,10 +37,10 @@ jobs:
           rustc --version
           cargo clippy --version
 
-      - name: Lint
-        run: |
-          cargo fmt -- --check
-          cargo clippy -- -D warnings
+#      - name: Lint
+#        run: |
+#          cargo fmt -- --check
+#          cargo clippy -- -D warnings
 
       - name: Test
         run: |

@@ -12,17 +12,20 @@ extern crate rocket;
 
 mod config;
 mod led_driver;
+mod render;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut led_driver = LedDriver::new();
+    let render = Arc::new(Mutex::new(Box::default()));
+
+    let mut led_driver = LedDriver::new(render.clone());
     led_driver.start()?;
 
     #[cfg(feature = "http_server")]
     let led_driver = Arc::new(Mutex::new(led_driver));
 
     #[cfg(feature = "http_server")]
-    http_server::build_rocket(led_driver)
+    http_server::build_rocket(led_driver, render)
         .ignite()
         .await?
         .launch()

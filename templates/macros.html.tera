@@ -61,15 +61,20 @@
 {% endmacro input %}
 
 {% macro textarea(label, name, placeholder="", max=250) %}
+  <div class="form-group">
     <label for="{{ name }}">{{ label }}</label>
-    <textarea placeholder="{{ placeholder }}"
-        name="{{ name }}" id="{{ name }}" rows="8" cols="40"
+    <textarea
+      placeholder="{{ placeholder }}"
+      name="{{ name }}" 
+      id="{{ name }}"
+      class="form-control" rows="8" cols="40"
         {% if name in errors %} class="error" {% endif %}
     >
         {{- self::value_for(name=name) -}}
     </textarea>
+  </div>
 
-    {{ self::errors_for(name=name) }}
+  {{ self::errors_for(name=name) }}
 {% endmacro input %}
 
 {% macro select(label, name, options) %}

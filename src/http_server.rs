@@ -1,3 +1,5 @@
+use anyhow::Result;
+use embedded_graphics::mono_font;
 use rocket::form::{Context, Contextual, Form, FromForm};
 use rocket::http::Status;
 use rocket::{Build, Rocket, State};
@@ -7,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::config;
 use crate::led_driver::LedDriver;
+use crate::render::{DebugTextConfig, DebugTextRender};
 
 #[derive(Debug, FromForm)]
 #[allow(dead_code)]
@@ -130,12 +133,111 @@ impl<'a> TryFrom<&HardwareConfigForm<'a>> for config::HardwareConfig {
     }
 }
 
+#[derive(Debug, FromForm)]
+struct DebugTextForm<'a> {
+    text: &'a str,
+    x: i32,
+    y: i32,
+    font: Font,
+}
+
+impl<'a> TryFrom<&DebugTextForm<'a>> for DebugTextConfig {
+    type Error = Box<dyn std::error::Error>;
+
+    fn try_from(form: &DebugTextForm<'a>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            text: form.text.to_string(),
+            x: form.x,
+            y: form.y,
+            font: form.font,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, FromFormField, Clone, Copy)]
+pub(crate) enum Font {
+    #[field(value = "4x6")]
+    FourBySix,
+    #[field(value = "5x7")]
+    FiveBySeven,
+    #[field(value = "5x8")]
+    FiveByEight,
+    #[field(value = "6x9")]
+    SixByNine,
+    #[field(value = "6x10")]
+    SixByTen,
+    #[field(value = "6x12")]
+    SixByTwelve,
+    #[field(value = "6x13")]
+    SixByThirteen,
+    #[field(value = "6x13 Bold")]
+    SixByThirteenBold,
+    #[field(value = "6x13 Italic")]
+    SixByThirteenItalic,
+    #[field(value = "7x13")]
+    SevenByThirteen,
+    #[field(value = "7x13 Bold")]
+    SevenByThirteenBold,
+    #[field(value = "7x13 Italic")]
+    SevenByThirteenItalic,
+    #[field(value = "7x14")]
+    SevenByFourteen,
+    #[field(value = "7x14 Bold")]
+    SevenByFourteenBold,
+    #[field(value = "8x13")]
+    EightByThirteen,
+    #[field(value = "8x13 Bold")]
+    EightByThirteenBold,
+    #[field(value = "8x13 Italic")]
+    EightByThirteenItalic,
+    #[field(value = "9x15")]
+    NineByFifteen,
+    #[field(value = "9x15 Bold")]
+    NineByFifteenBold,
+    #[field(value = "9x18")]
+    NineByEighteen,
+    #[field(value = "9x18 Bold")]
+    NineByEighteenBold,
+    #[field(value = "10x20")]
+    TenByTwenty,
+}
+
+impl From<Font> for mono_font::MonoFont<'static> {
+    fn from(value: Font) -> Self {
+        match value {
+            Font::FourBySix => mono_font::ascii::FONT_4X6,
+            Font::FiveBySeven => mono_font::ascii::FONT_5X7,
+            Font::FiveByEight => mono_font::ascii::FONT_5X8,
+            Font::SixByNine => mono_font::ascii::FONT_6X9,
+            Font::SixByTen => mono_font::ascii::FONT_6X10,
+            Font::SixByTwelve => mono_font::ascii::FONT_6X12,
+            Font::SixByThirteen => mono_font::ascii::FONT_6X13,
+            Font::SixByThirteenBold => mono_font::ascii::FONT_6X13_BOLD,
+            Font::SixByThirteenItalic => mono_font::ascii::FONT_6X13_ITALIC,
+            Font::SevenByThirteen => mono_font::ascii::FONT_7X13,
+            Font::SevenByThirteenBold => mono_font::ascii::FONT_7X13_BOLD,
+            Font::SevenByThirteenItalic => mono_font::ascii::FONT_7X13_ITALIC,
+            Font::SevenByFourteen => mono_font::ascii::FONT_7X14,
+            Font::SevenByFourteenBold => mono_font::ascii::FONT_7X14_BOLD,
+            Font::EightByThirteen => mono_font::ascii::FONT_8X13,
+            Font::EightByThirteenBold => mono_font::ascii::FONT_8X13_BOLD,
+            Font::EightByThirteenItalic => mono_font::ascii::FONT_8X13_ITALIC,
+            Font::NineByFifteen => mono_font::ascii::FONT_9X15,
+            Font::NineByFifteenBold => mono_font::ascii::FONT_9X15_BOLD,
+            Font::NineByEighteen => mono_font::ascii::FONT_9X18,
+            Font::NineByEighteenBold => mono_font::ascii::FONT_9X18_BOLD,
+            Font::TenByTwenty => mono_font::ascii::FONT_10X20,
+        }
+    }
+}
+
 #[get("/config")]
 fn configuration() -> Template {
     Template::render("config", &Context::default())
 }
 
 struct DriverState(Arc<Mutex<LedDriver>>);
+struct DebugTextRenderState(Arc<Mutex<Box<DebugTextRender>>>);
 
 #[post("/config", data = "<form>")]
 fn submit_configuration<'r>(
@@ -159,9 +261,47 @@ fn submit_configuration<'r>(
     (form.context.status(), template)
 }
 
-pub(crate) fn build_rocket(led_driver: Arc<Mutex<LedDriver>>) -> Rocket<Build> {
+#[get("/debug_text")]
+fn debug_text() -> Template {
+    Template::render("debug_text", &Context::default())
+}
+
+#[post("/debug_text", data = "<form>")]
+fn submit_debug_text<'a>(
+    form: Form<Contextual<'a, DebugTextForm<'a>>>,
+    debug_text_render_state: &State<DebugTextRenderState>,
+) -> (Status, Template) {
+    let template = match form.value {
+        Some(ref submission) => {
+            println!("submission: {:#?}", submission);
+
+            let mut render_unlock = debug_text_render_state.0.lock().expect("Poisoned mutex");
+            let config: DebugTextConfig = submission.try_into().expect("Bad conversion");
+            render_unlock.update_config(config);
+
+            Template::render("debug_text", &form.context)
+        }
+        None => Template::render("debug_text", &form.context),
+    };
+
+    (form.context.status(), template)
+}
+
+pub(crate) fn build_rocket(
+    led_driver: Arc<Mutex<LedDriver>>,
+    render: Arc<Mutex<Box<DebugTextRender>>>,
+) -> Rocket<Build> {
     rocket::build()
-        .mount("/", routes![configuration, submit_configuration])
+        .mount(
+            "/",
+            routes![
+                configuration,
+                submit_configuration,
+                debug_text,
+                submit_debug_text
+            ],
+        )
         .attach(Template::fairing())
         .manage(DriverState(led_driver))
+        .manage(DebugTextRenderState(render))
 }

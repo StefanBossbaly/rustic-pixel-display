@@ -1,12 +1,6 @@
 use crate::config;
+use crate::render::{DebugTextRender, Render};
 use anyhow::{anyhow, Context, Ok, Result};
-use embedded_graphics::{
-    mono_font::{ascii::FONT_7X13_BOLD, MonoTextStyle},
-    pixelcolor::Rgb888,
-    prelude::*,
-    text::{Alignment, Text},
-    Drawable,
-};
 use rpi_led_panel::{Canvas, RGBMatrix};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
@@ -29,12 +23,14 @@ pub struct LedDriver {
     thread_handle: Option<thread::JoinHandle<Result<()>>>,
     alive: Arc<AtomicBool>,
     configs: Arc<Mutex<ConfigHolder>>,
+    render: Arc<Mutex<Box<DebugTextRender>>>,
 }
 
 impl LedDriver {
     const CONFIG_FILE: &'static str = "led-statusboard.yaml";
 
-    pub fn new() -> Self {
+    // TODO: Replace DebugTextRender with a Render trait object
+    pub(crate) fn new(render: Arc<Mutex<Box<DebugTextRender>>>) -> Self {
         LedDriver {
             thread_handle: None,
             alive: Arc::new(AtomicBool::new(false)),
@@ -42,6 +38,7 @@ impl LedDriver {
                 current_config: None,
                 pending_config: None,
             })),
+            render,
         }
     }
 
@@ -88,6 +85,7 @@ impl LedDriver {
         // Clone variable that will be moved into the thread
         let alive = self.alive.clone();
         let configs = self.configs.clone();
+        let render = self.render.clone();
 
         // Attempt to read the configuration
         let file_config = self.read_config()?;
@@ -133,16 +131,13 @@ impl LedDriver {
                 if let (Some(matrix), Some(mut canvas_ref)) = (&mut matrix, canvas) {
                     canvas_ref.fill(0, 0, 0);
 
-                    let text = Text::with_alignment(
-                        "Hello\nWorld",
-                        Point::new(64, 32),
-                        MonoTextStyle::new(&FONT_7X13_BOLD, Rgb888::GREEN),
-                        Alignment::Center,
-                    );
+                    let render_unlock = render
+                        .lock()
+                        .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
 
-                    text.draw(canvas_ref.as_mut()).unwrap();
+                    render_unlock.render(canvas_ref.as_mut())?;
+
                     canvas = Some(matrix.update_on_vsync(canvas_ref));
-                    println!("Updated canvas")
                 } else {
                     matrix = None;
                     canvas = None;

@@ -1,7 +1,6 @@
 use anyhow::Result;
 use led_driver::LedDriver;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "http_server")]
 mod http_server;

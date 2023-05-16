@@ -1,5 +1,4 @@
 use crate::http_server::Font;
-
 use anyhow::Result;
 use embedded_graphics::{
     mono_font::{self, MonoTextStyle},

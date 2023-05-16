@@ -1,12 +1,17 @@
 use anyhow::Result;
 use embedded_graphics::mono_font;
-use rocket::form::{Context, Contextual, Form, FromForm};
-use rocket::http::Status;
-use rocket::{Build, Rocket, State};
+use rocket::{
+    form::{Context, Contextual, Form, FromForm},
+    fs::{relative, FileServer},
+    http::Status,
+    Build, Rocket, State,
+};
 use rocket_dyn_templates::{context, Template};
 use serde::Serialize;
-use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::{
+    str::FromStr,
+    sync::{Arc, Mutex},
+};
 
 use crate::config;
 use crate::led_driver::LedDriver;
@@ -347,6 +352,7 @@ pub(crate) fn build_rocket(
                 submit_debug_text
             ],
         )
+        .mount("/", FileServer::from(relative!("/static")))
         .attach(Template::fairing())
         .manage(DriverState(led_driver))
         .manage(DebugTextRenderState(render))

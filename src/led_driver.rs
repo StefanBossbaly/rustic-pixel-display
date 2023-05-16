@@ -1,13 +1,17 @@
-use crate::config;
-use crate::render::{DebugTextRender, Render};
+use crate::{
+    config,
+    render::{DebugTextRender, Render},
+};
 use anyhow::{anyhow, Context, Ok, Result};
 use rpi_led_panel::{Canvas, RGBMatrix};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     fs::File,
     io::BufWriter,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        {Arc, Mutex},
+    },
 };
 use std::{io::BufReader, thread};
 // This will be the shared matrix config between the LedDriver thread and other signaling thread(s)

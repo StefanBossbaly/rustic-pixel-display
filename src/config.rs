@@ -1,7 +1,6 @@
-use std::str::FromStr;
-
 use rpi_led_panel::RGBMatrixConfig;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use strum_macros::{AsRefStr, EnumString};
 
 #[derive(Clone, Serialize, Deserialize, Debug, EnumString, AsRefStr)]

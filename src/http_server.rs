@@ -276,13 +276,12 @@ fn configuration(driver_state: &State<DriverState>) -> Template {
                 led_sequence: config_value.led_sequence.as_ref(),
             };
 
-            let ctx = context! {
-                initial_values: form,
-            };
-
-            dbg!(&ctx);
-
-            Template::render("config", ctx)
+            Template::render(
+                "config",
+                context! {
+                    initial_values: form,
+                },
+            )
         }
     }
 }

@@ -111,35 +111,39 @@ impl LedDriver {
             let mut canvas: Option<Box<Canvas>> = None;
 
             while alive.load(Ordering::SeqCst) {
-                // Update the configuration, if necessary
-                let mut configs_unlock = configs
-                    .lock()
-                    .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
+                {
+                    // Update the configuration, if necessary
+                    let mut configs_unlock = configs
+                        .lock()
+                        .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
 
-                if let Some(new_config) = configs_unlock.pending_config.take() {
-                    println!("Updating config: {:#?}", new_config);
+                    if let Some(new_config) = configs_unlock.pending_config.take() {
+                        println!("Updating config: {:#?}", new_config);
 
-                    // Update the current config
-                    configs_unlock.current_config = Some(new_config.clone());
+                        // Update the current config
+                        configs_unlock.current_config = Some(new_config.clone());
 
-                    // Convert into RGBMatrixConfig
-                    let hardware_config = new_config
-                        .try_into()
-                        .map_err(|e| anyhow!("Can't convert to RGBMatrixConfig {:?}", e))?;
+                        // Convert into RGBMatrixConfig
+                        let hardware_config = new_config
+                            .try_into()
+                            .map_err(|e| anyhow!("Can't convert to RGBMatrixConfig {:?}", e))?;
 
-                    let result = RGBMatrix::new(hardware_config, 0)
-                        .context("Invalid configuration provided")?;
-                    (matrix, canvas) = (Some(result.0), Some(result.1));
-                }
+                        let result = RGBMatrix::new(hardware_config, 0)
+                            .context("Invalid configuration provided")?;
+                        (matrix, canvas) = (Some(result.0), Some(result.1));
+                    }
+                } //drop(configs_unlock)
 
                 if let (Some(matrix), Some(mut canvas_ref)) = (&mut matrix, canvas) {
                     canvas_ref.fill(0, 0, 0);
 
-                    let render_unlock = render
-                        .lock()
-                        .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
+                    {
+                        let render_unlock = render
+                            .lock()
+                            .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
 
-                    render_unlock.render(canvas_ref.as_mut())?;
+                        render_unlock.render(canvas_ref.as_mut())?;
+                    } //drop(render_unlock)
 
                     canvas = Some(matrix.update_on_vsync(canvas_ref));
                 } else {

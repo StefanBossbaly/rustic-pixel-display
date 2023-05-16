@@ -1,29 +1,48 @@
 {% macro value_for(name) %}
+  {%- if initial_values -%}
+    {%- if name in initial_values -%}
+      {{- initial_values | get(key=name) -}}
+    {%- endif -%}
+  {%- elif values -%}
     {%- if name in values -%}
-        {{- values | get(key=name) | first -}}
-    {%- endif -%}
-{% endmacro %}
-
-{% macro errors_for(name) %}
-    {%- if name in errors -%}
-        {% set field_errors = errors | get(key=name) %}
-        {% for error in field_errors %}
-            <p class="text-error is-marginless">{{ error.msg }}</p>
-        {% endfor %}
-    {%- endif -%}
-{% endmacro %}
-
-{% macro error_class(name) %}
-  {%- if name in errors -%}
-    {%- set field_errors = errors | get(key=name) -%}
-    {%- if field_errors | length == 0 -%}
-      is-valid
-    {%- else -%}
-      is-invalid
+      {{- values | get(key=name) | first -}}
     {%- endif -%}
   {%- endif -%}
 {% endmacro %}
 
+{% macro errors_for(name) %}
+  {%- if errors -%}
+    {%- if name in errors -%}
+      {% set field_errors = errors | get(key=name) %}
+      {% for error in field_errors %}
+        <p class="text-error is-marginless">{{ error.msg }}</p>
+      {% endfor %}
+    {%- endif -%}
+  {%- endif -%}
+{% endmacro %}
+
+{% macro error_class(name) %}
+  {%- if errors -%}
+    {%- if name in errors -%}
+      {%- set field_errors = errors | get(key=name) -%}
+      {%- if field_errors | length == 0 -%}
+        is-valid
+      {%- else -%}
+        is-invalid
+      {%- endif -%}
+    {%- endif -%}
+  {%- endif -%}
+{% endmacro %}
+
+{% macro error_overview() %}
+  {%- if errors -%}
+    {%- if errors | length > 1 -%}
+      <small class="text-error" style="margin-top: -20px">
+        {{ errors | length }} field(s) have errors
+      </small>
+    {%- endif -%}
+  {%- endif -%}
+{% endmacro %}
 
 {% macro input(type, label, name, value="") %}
   <div class="form-group row">
@@ -67,9 +86,7 @@
       placeholder="{{ placeholder }}"
       name="{{ name }}" 
       id="{{ name }}"
-      class="form-control" rows="8" cols="40"
-        {% if name in errors %} class="error" {% endif %}
-    >
+      class="form-control" rows="8" cols="40">
         {{- self::value_for(name=name) -}}
     </textarea>
   </div>

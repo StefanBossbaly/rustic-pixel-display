@@ -20,11 +20,7 @@
     <div class="container">
       <h1>RGB Matrix Configuration</h1>
 
-      {% if errors | length > 1 %}
-          <small class="text-error" style="margin-top: -20px">
-              {{ errors | length }} field(s) have errors
-          </small>
-      {% endif %}
+      {{ m::error_overview() }}
 
       <form action="/config" method="post" enctype="multipart/form-data">
         {{

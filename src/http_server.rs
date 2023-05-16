@@ -3,7 +3,8 @@ use embedded_graphics::mono_font;
 use rocket::form::{Context, Contextual, Form, FromForm};
 use rocket::http::Status;
 use rocket::{Build, Rocket, State};
-use rocket_dyn_templates::Template;
+use rocket_dyn_templates::{context, Template};
+use serde::Serialize;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -11,7 +12,7 @@ use crate::config;
 use crate::led_driver::LedDriver;
 use crate::render::{DebugTextConfig, DebugTextRender};
 
-#[derive(Debug, FromForm)]
+#[derive(Debug, FromForm, Serialize)]
 #[allow(dead_code)]
 struct HardwareConfigForm<'a> {
     #[field(validate = one_of(["AdafruitHat", "AdafruitHatPwm", "Regular", "RegularPi1", "Classic", "ClassicPi1"]), default="Regular")]
@@ -232,8 +233,53 @@ impl From<Font> for mono_font::MonoFont<'static> {
 }
 
 #[get("/config")]
-fn configuration() -> Template {
-    Template::render("config", &Context::default())
+fn configuration(driver_state: &State<DriverState>) -> Template {
+    let unlocked_state = driver_state.0.lock().expect("Poisoned mutex");
+    let config = unlocked_state.get_config().expect("Could not get config");
+
+    match config {
+        None => Template::render("config", Context::default()),
+        Some(config_value) => {
+            let form = HardwareConfigForm {
+                hardware_mapping: config_value.hardware_mapping.as_ref(),
+                rows: config_value.rows,
+                cols: config_value.cols,
+                refresh_rate: config_value.refresh_rate,
+                pi_chip: match &config_value.pi_chip {
+                    Some(pi_chip) => pi_chip.as_ref(),
+                    None => "Automatic",
+                },
+                pwm_bits: config_value.pwm_bits,
+                pwm_lsb_nanoseconds: config_value.pwm_lsb_nanoseconds,
+                slowdown: config_value.slowdown.unwrap_or(0),
+                interlaced: match config_value.interlaced {
+                    true => "True",
+                    false => "False",
+                },
+                dither_bits: config_value.dither_bits,
+                chain_length: config_value.chain_length,
+                parallel: config_value.parallel,
+                panel_type: match &config_value.panel_type {
+                    Some(panel_type) => panel_type.as_ref(),
+                    None => "None",
+                },
+                multiplexing: match &config_value.multiplexing {
+                    Some(multiplexing) => multiplexing.as_ref(),
+                    None => "None",
+                },
+                row_setter: config_value.row_setter.as_ref(),
+                led_sequence: config_value.led_sequence.as_ref(),
+            };
+
+            let ctx = context! {
+                initial_values: form,
+            };
+
+            dbg!(&ctx);
+
+            Template::render("config", ctx)
+        }
+    }
 }
 
 struct DriverState(Arc<Mutex<LedDriver>>);

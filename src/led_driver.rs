@@ -1,72 +1,171 @@
-use crate::{
-    config,
-    render::{DebugTextRender, Render},
-};
-use anyhow::{anyhow, Context, Ok, Result};
+use crate::{config, render::Render};
+use anyhow::{anyhow, Context, Result};
+use bus::{Bus, BusReader};
 use rpi_led_panel::{Canvas, RGBMatrix};
 use std::{
     fs::File,
-    io::BufWriter,
+    io::{BufWriter, Write},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        {Arc, Mutex},
+        mpsc::RecvTimeoutError,
+        Arc,
     },
+    time::Duration,
 };
 use std::{io::BufReader, thread};
-// This will be the shared matrix config between the LedDriver thread and other signaling thread(s)
-// Arc allows it to be shared between threads in a thread-safe manner, Mutex allows the inner data type
-// to be thread safe. Option means that there is no pending configuration update, and Some means that there
-// is a pending configuration update.
-struct ConfigHolder {
-    current_config: Option<config::HardwareConfig>,
-    pending_config: Option<config::HardwareConfig>,
+
+#[derive(Debug, Clone)]
+pub(crate) enum RxEvent {
+    UpdateMatrixConfig(config::HardwareConfig),
+    UpdateRenderConfig(),
 }
 
-pub struct LedDriver {
-    thread_handle: Option<thread::JoinHandle<Result<()>>>,
+#[derive(Debug, Clone)]
+pub(crate) enum TxEvent {
+    UpdateConfig(config::HardwareConfig),
+}
+
+pub(crate) struct LedDriver {
+    /// Flag used to gracefully terminate the render and driver threads
     alive: Arc<AtomicBool>,
-    configs: Arc<Mutex<ConfigHolder>>,
-    render: Arc<Mutex<Box<DebugTextRender>>>,
+    /// Handle to the render thread
+    render_thread_handle: thread::JoinHandle<Result<()>>,
+    /// Handle to the driver thread
+    driver_thread_handle: thread::JoinHandle<Result<()>>,
 }
 
 impl LedDriver {
     const CONFIG_FILE: &'static str = "led-statusboard.yaml";
 
-    // TODO: Replace DebugTextRender with a Render trait object
-    pub(crate) fn new(render: Arc<Mutex<Box<DebugTextRender>>>) -> Self {
-        LedDriver {
-            thread_handle: None,
-            alive: Arc::new(AtomicBool::new(false)),
-            configs: Arc::new(Mutex::new(ConfigHolder {
-                current_config: None,
-                pending_config: None,
-            })),
-            render,
-        }
+    pub(crate) fn new(render: Box<dyn Render>) -> Result<(Self, Bus<RxEvent>, BusReader<TxEvent>)> {
+        let alive = Arc::new(AtomicBool::new(true));
+
+        // Bus used to receive events. We will transfer ownership of this bus since we are the sink and the caller will be the source.
+        let mut event_bus_rx: Bus<RxEvent> = Bus::new(10);
+        let event_bus_rx_render_reader = event_bus_rx.add_rx();
+        let event_bus_rx_driver_reader = event_bus_rx.add_rx();
+
+        // Bus used to send events. We will retain ownership of this bus since we are the source and the caller will be the sink.
+        let mut event_bus_tx: Bus<TxEvent> = Bus::new(10);
+        let event_bus_tx_reader = event_bus_tx.add_rx();
+
+        // Read the configuration from the saved file
+        let config = Self::read_config()?;
+        println!("Loaded config from file: {:#?}", config);
+
+        // Clone variable that will be moved into the thread
+        let alive_render = alive.clone();
+        let alive_driver = alive;
+
+        // Channels used to send the canvas between the render and driver threads
+        let (driver_to_render_sender, driver_to_render_receiver) =
+            std::sync::mpsc::channel::<Box<Canvas>>();
+        let (render_to_driver_sender, render_to_driver_receiver) =
+            std::sync::mpsc::channel::<Box<Canvas>>();
+
+        // Create the render thread
+        let render_thread_handle = thread::spawn(move || -> Result<()> {
+            while alive_render.load(Ordering::SeqCst) {
+                match event_bus_rx_render_reader.try_recv() {
+                    Ok(event) => match event {
+                        _ => {}
+                    },
+                    Err(x) => match x {
+                        std::sync::mpsc::TryRecvError::Disconnected => {
+                            return Err(anyhow!("Disconnected from event bus"));
+                        }
+                        std::sync::mpsc::TryRecvError::Empty => {}
+                    },
+                }
+
+                let mut canvas = driver_to_render_receiver.recv()?;
+
+                render.render(canvas.as_mut())?;
+
+                render_to_driver_sender.send(canvas)?;
+            }
+
+            Ok(())
+        });
+
+        // Create the driver thread
+        let driver_thread_handle = thread::spawn(move || -> Result<()> {
+            let mut matrix: Option<RGBMatrix> = None;
+            let mut step: u64 = 0;
+
+            while alive_driver.load(Ordering::SeqCst) {
+                match event_bus_rx_driver_reader.try_recv() {
+                    Ok(rx_event) => match rx_event {
+                        RxEvent::UpdateMatrixConfig(rx_config) => {
+                            println!("Updating config: {:#?}", rx_config);
+
+                            // Convert into RGBMatrixConfig
+                            let hardware_config = rx_config
+                                .try_into()
+                                .map_err(|e| anyhow!("Can't convert to RGBMatrixConfig {:?}", e))?;
+
+                            let result = RGBMatrix::new(hardware_config, 0)
+                                .context("Invalid configuration provided")?;
+
+                            matrix = Some(result.0);
+                            driver_to_render_sender.send(result.1)?;
+
+                            event_bus_tx.broadcast(TxEvent::UpdateConfig(rx_config.clone()));
+                        }
+                        _ => {}
+                    },
+                    Err(x) => match x {
+                        std::sync::mpsc::TryRecvError::Disconnected => {
+                            return Err(anyhow!("Disconnected from event bus"));
+                        }
+                        std::sync::mpsc::TryRecvError::Empty => {}
+                    },
+                }
+
+                if let Some(matrix) = &mut matrix {
+                    // Figure our the current framerate so we know how long to wait to receive a frame from the render
+                    let framerate = matrix.get_framerate();
+                    let timeout = Duration::from_millis((1000.0 / framerate as f64) as u64);
+
+                    match render_to_driver_receiver.recv_timeout(timeout) {
+                        Ok(canvas) => {
+                            let canvas_new = matrix.update_on_vsync(canvas);
+                            driver_to_render_sender.send(canvas_new)?;
+                        }
+                        Err(RecvTimeoutError::Disconnected) => {
+                            break;
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            println!("Timeout waiting for frame from render");
+                            continue;
+                        }
+                    }
+
+                    if step % 120 == 0 {
+                        print!("\r{:>100}\rFramerate: {}", "", matrix.get_framerate());
+                        std::io::stdout().flush().unwrap();
+                    }
+                    step += 1;
+                }
+            }
+
+            Ok(())
+        });
+
+        Ok((
+            Self {
+                alive,
+                render_thread_handle,
+                driver_thread_handle,
+            },
+            event_bus_rx,
+            event_bus_tx_reader,
+        ))
     }
 
-    pub(crate) fn update_config(&mut self, config: config::HardwareConfig) -> Result<()> {
-        self.write_config(&config)?;
-
-        let mut configs = self
-            .configs
-            .lock()
-            .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
-        configs.pending_config = Some(config);
-
-        Ok(())
-    }
-
-    pub(crate) fn get_config(&self) -> Result<Option<config::HardwareConfig>> {
-        let configs = self
-            .configs
-            .lock()
-            .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
-        Ok(configs.current_config.clone())
-    }
-
-    fn get_config_file(&self) -> Result<File> {
+    /// Load the configuration file from the user's home directory
+    fn get_config_file() -> Result<File> {
         let home_dir = std::env::var("HOME").context("Can not load HOME environment variable")?;
         let mut file_path = PathBuf::from(home_dir);
         file_path.push(Self::CONFIG_FILE);
@@ -74,87 +173,14 @@ impl LedDriver {
             .with_context(|| format!("Failed to open file {}", Self::CONFIG_FILE))?)
     }
 
-    fn read_config(&self) -> Result<config::HardwareConfig> {
-        let file_reader = BufReader::new(self.get_config_file()?);
+    fn read_config() -> Result<config::HardwareConfig> {
+        let file_reader = BufReader::new(Self::get_config_file()?);
         Ok(serde_yaml::from_reader(file_reader).context("Unable to parse YAML file")?)
     }
 
-    fn write_config(&self, config: &config::HardwareConfig) -> Result<()> {
-        let file_writer = BufWriter::new(self.get_config_file()?);
+    fn write_config(config: &config::HardwareConfig) -> Result<()> {
+        let file_writer = BufWriter::new(Self::get_config_file()?);
         serde_yaml::to_writer(file_writer, config).context("Could not write to YAML file")?;
-        Ok(())
-    }
-
-    pub fn start(&mut self) -> Result<()> {
-        // Clone variable that will be moved into the thread
-        let alive = self.alive.clone();
-        let configs = self.configs.clone();
-        let render = self.render.clone();
-
-        // Attempt to read the configuration
-        let file_config = self.read_config()?;
-        println!("Loaded config from file: {:#?}", file_config);
-
-        // Populate the configuration
-        {
-            let mut configs_unlock = configs
-                .lock()
-                .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
-            configs_unlock.pending_config = Some(file_config);
-        } // drop(configs_unlock)
-
-        // Mark the thread as active
-        self.alive.store(true, Ordering::SeqCst);
-
-        self.thread_handle = Some(thread::spawn(move || -> Result<()> {
-            let mut matrix: Option<RGBMatrix> = None;
-            let mut canvas: Option<Box<Canvas>> = None;
-
-            while alive.load(Ordering::SeqCst) {
-                {
-                    // Update the configuration, if necessary
-                    let mut configs_unlock = configs
-                        .lock()
-                        .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
-
-                    if let Some(new_config) = configs_unlock.pending_config.take() {
-                        println!("Updating config: {:#?}", new_config);
-
-                        // Update the current config
-                        configs_unlock.current_config = Some(new_config.clone());
-
-                        // Convert into RGBMatrixConfig
-                        let hardware_config = new_config
-                            .try_into()
-                            .map_err(|e| anyhow!("Can't convert to RGBMatrixConfig {:?}", e))?;
-
-                        let result = RGBMatrix::new(hardware_config, 0)
-                            .context("Invalid configuration provided")?;
-                        (matrix, canvas) = (Some(result.0), Some(result.1));
-                    }
-                } //drop(configs_unlock)
-
-                if let (Some(matrix), Some(mut canvas_ref)) = (&mut matrix, canvas) {
-                    canvas_ref.fill(0, 0, 0);
-
-                    {
-                        let render_unlock = render
-                            .lock()
-                            .map_err(|e| anyhow!("Poisoned mutex {:?}", e))?;
-
-                        render_unlock.render(canvas_ref.as_mut())?;
-                    } //drop(render_unlock)
-
-                    canvas = Some(matrix.update_on_vsync(canvas_ref));
-                } else {
-                    matrix = None;
-                    canvas = None;
-                }
-            }
-
-            Ok(())
-        }));
-
         Ok(())
     }
 }
@@ -162,17 +188,23 @@ impl LedDriver {
 impl Drop for LedDriver {
     fn drop(&mut self) {
         let Self {
-            thread_handle,
             alive,
+            render_thread_handle,
+            driver_thread_handle,
             ..
         } = self;
 
-        if let Some(thread_handle) = thread_handle.take() {
-            alive.store(false, Ordering::SeqCst);
-            thread_handle
-                .join()
-                .expect("Failed to join thread")
-                .expect("Thread encountered an error");
-        }
+        // Stop the threads
+        alive.store(false, Ordering::SeqCst);
+
+        render_thread_handle
+            .join()
+            .expect("Failed to join the render thread")
+            .expect("Render thread encountered an error");
+
+        driver_thread_handle
+            .join()
+            .expect("Failed to join the driver thread")
+            .expect("Driver thread encountered an error");
     }
 }

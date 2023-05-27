@@ -1,6 +1,9 @@
+use std::any::Any;
+
 use crate::http_server::Font;
 use anyhow::Result;
 use embedded_graphics::{
+    image::{Image, ImageRaw, ImageRawBE},
     mono_font::{self, MonoTextStyle},
     pixelcolor::Rgb888,
     prelude::*,
@@ -26,8 +29,8 @@ pub(crate) struct DebugTextConfig {
 }
 
 impl DebugTextRender {
-    pub(crate) fn update_config(&mut self, config: DebugTextConfig) {
-        self.config = Some(config);
+    pub(crate) fn new() -> Self {
+        Self::default()
     }
 }
 
@@ -45,6 +48,39 @@ impl Render for DebugTextRender {
 
             text.draw(canvas)?;
         }
+
+        Ok(())
+    }
+}
+
+const IMAGE_DATA: &[u8] = include_bytes!("../assets/ferris_test_card.rgb");
+const IMAGE_SIZE: usize = 64;
+
+pub(crate) struct ImageRender<'a> {
+    image_raw: ImageRaw<'a, Rgb888>,
+}
+
+impl<'a> ImageRender<'a> {
+    pub(crate) fn new() -> Self {
+        let image_data = ImageRawBE::<Rgb888>::new(IMAGE_DATA, IMAGE_SIZE as u32);
+
+        Self {
+            image_raw: image_data,
+        }
+    }
+}
+
+impl<'a> Render for ImageRender<'a> {
+    fn render(&self, canvas: &mut rpi_led_panel::Canvas) -> Result<()> {
+        let image = Image::new(
+            &self.image_raw,
+            Point::new(
+                (128 / 2 - IMAGE_SIZE / 2) as i32,
+                (64 / 2 - IMAGE_SIZE / 2) as i32,
+            ),
+        );
+
+        image.draw(canvas)?;
 
         Ok(())
     }

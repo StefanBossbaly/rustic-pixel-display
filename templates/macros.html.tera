@@ -13,10 +13,10 @@
 {% macro errors_for(name) %}
   {%- if errors -%}
     {%- if name in errors -%}
-      {% set field_errors = errors | get(key=name) %}
-      {% for error in field_errors %}
+      {%- set field_errors = errors | get(key=name) -%}
+      {%- for error in field_errors -%}
         <p class="text-error is-marginless">{{ error.msg }}</p>
-      {% endfor %}
+      {%- endfor -%}
     {%- endif -%}
   {%- endif -%}
 {% endmacro %}
@@ -68,12 +68,12 @@
              class="form-check-input"
              name="{{ name }}"
              id="{{ name }}"
-      {% if name in values %}
-        {% set field_values = values | get(key=name) %}
-        {% if field_values is containing(value) %}
-            checked
-        {% endif %}
-      {% endif %}
+      {%- if name in values -%}
+        {%- set field_values = values | get(key=name) -%}
+        {%- if field_values is containing(value) -%}
+          checked
+        {%- endif -%}
+      {%- endif -%}
       />
     </div>
   </div>
@@ -99,11 +99,11 @@
     <label for="{{ name }}" class="col-4 col-form-label">{{ label }}</label>
     <div class="col-8"> 
       <select name="{{ name }}" id="{{ name }}" class="custom-select">
-        {% for value in options %}
+        {%- for value in options -%}
           <option value="{{ value }}"
-            {% if self::value_for(name=name) == value %} selected {% endif %}
+            {%- if self::value_for(name=name) == value -%} selected {%- endif -%}
           >{{ value }}</option>
-        {% endfor %}
+        {%- endfor -%}
       </select>
     </div>
   </div>

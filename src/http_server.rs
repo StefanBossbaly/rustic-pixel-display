@@ -1,4 +1,5 @@
 use anyhow::Result;
+use bus::{Bus, BusReader};
 use embedded_graphics::mono_font;
 use rocket::{
     form::{Context, Contextual, Form, FromForm},
@@ -13,9 +14,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::config;
 use crate::led_driver::LedDriver;
 use crate::render::{DebugTextConfig, DebugTextRender};
+use crate::{
+    config,
+    led_driver::{RxEvent, TxEvent},
+};
 
 #[derive(Debug, FromForm, Serialize)]
 #[allow(dead_code)]
@@ -238,9 +242,9 @@ impl From<Font> for mono_font::MonoFont<'static> {
 }
 
 #[get("/config")]
-fn configuration(driver_state: &State<DriverState>) -> Template {
-    let unlocked_state = driver_state.0.lock().expect("Poisoned mutex");
-    let config = unlocked_state.get_config().expect("Could not get config");
+fn configuration(bus_state: &State<BusState>) -> Template {
+    // TODO: Load a saved config
+    let config: Option<config::HardwareConfig> = None;
 
     match config {
         None => Template::render("config", Context::default()),
@@ -286,22 +290,29 @@ fn configuration(driver_state: &State<DriverState>) -> Template {
     }
 }
 
-struct DriverState(Arc<Mutex<LedDriver>>);
-struct DebugTextRenderState(Arc<Mutex<Box<DebugTextRender>>>);
+struct BusStateHolder {
+    tx_bus: Bus<RxEvent>,
+    rx_bus_reader: BusReader<TxEvent>,
+    current_config: Option<config::HardwareConfig>,
+}
+
+struct BusState(Arc<BusStateHolder>);
 
 #[post("/config", data = "<form>")]
 fn submit_configuration<'r>(
     form: Form<Contextual<'r, HardwareConfigForm<'r>>>,
-    driver_state: &State<DriverState>,
+    bus_state: &State<BusState>,
 ) -> (Status, Template) {
     let template = match form.value {
         Some(ref submission) => {
             println!("submission: {:#?}", submission);
 
+            // Broadcast the new configuration to the driver
             let new_config = submission.try_into().expect("Bad conversion");
-            let mut lock = driver_state.0.lock().expect("Poisoned mutex");
-            lock.update_config(new_config)
-                .expect("Could not update config");
+            bus_state
+                .0
+                .tx_bus
+                .broadcast(RxEvent::UpdateMatrixConfig(new_config));
 
             Template::render("config", &form.context)
         }
@@ -317,17 +328,12 @@ fn debug_text() -> Template {
 }
 
 #[post("/debug_text", data = "<form>")]
-fn submit_debug_text<'a>(
-    form: Form<Contextual<'a, DebugTextForm<'a>>>,
-    debug_text_render_state: &State<DebugTextRenderState>,
-) -> (Status, Template) {
+fn submit_debug_text<'a>(form: Form<Contextual<'a, DebugTextForm<'a>>>) -> (Status, Template) {
     let template = match form.value {
         Some(ref submission) => {
             println!("submission: {:#?}", submission);
 
-            let mut render_unlock = debug_text_render_state.0.lock().expect("Poisoned mutex");
-            let config: DebugTextConfig = submission.try_into().expect("Bad conversion");
-            render_unlock.update_config(config);
+            // TODO: update the render's configuration
 
             Template::render("debug_text", &form.context)
         }
@@ -338,8 +344,8 @@ fn submit_debug_text<'a>(
 }
 
 pub(crate) fn build_rocket(
-    led_driver: Arc<Mutex<LedDriver>>,
-    render: Arc<Mutex<Box<DebugTextRender>>>,
+    tx_bus: Bus<RxEvent>,
+    rx_bus_reader: BusReader<TxEvent>,
 ) -> Rocket<Build> {
     rocket::build()
         .mount(
@@ -353,6 +359,9 @@ pub(crate) fn build_rocket(
         )
         .mount("/", FileServer::from(relative!("/static")))
         .attach(Template::fairing())
-        .manage(DriverState(led_driver))
-        .manage(DebugTextRenderState(render))
+        .manage(BusState(Arc::new(BusStateHolder {
+            tx_bus,
+            rx_bus_reader,
+            current_config: None,
+        })))
 }

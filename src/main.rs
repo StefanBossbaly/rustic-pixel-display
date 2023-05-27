@@ -1,5 +1,6 @@
 use anyhow::Result;
 use led_driver::LedDriver;
+use render::DebugTextRender;
 use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "http_server")]
@@ -13,18 +14,17 @@ mod config;
 mod led_driver;
 mod render;
 
-#[tokio::main]
+#[rocket::main]
 async fn main() -> Result<()> {
-    let render = Arc::new(Mutex::new(Box::default()));
+    let render = Box::new(DebugTextRender::new());
 
-    let mut led_driver = LedDriver::new(render.clone());
-    led_driver.start()?;
+    let (led_driver, tx_bus, rx_bus_reader) = LedDriver::new(render)?;
 
     #[cfg(feature = "http_server")]
     let led_driver = Arc::new(Mutex::new(led_driver));
 
     #[cfg(feature = "http_server")]
-    http_server::build_rocket(led_driver, render)
+    http_server::build_rocket(tx_bus, rx_bus_reader)
         .ignite()
         .await?
         .launch()

@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate lazy_static;
+
 use anyhow::Result;
 use led_driver::LedDriver;
 use render::DebugTextRender;
@@ -13,6 +16,7 @@ extern crate rocket;
 mod config;
 mod led_driver;
 mod render;
+mod transit;
 
 #[rocket::main]
 async fn main() -> Result<()> {

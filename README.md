@@ -1,4 +1,4 @@
-# LED Status Board
+# Rustic Pixel Display
 
 This project is currently a work in progress. The goal of this project is to build a driver for
 RGB LED matrices that displays things like real time location, transit, stocks and various other

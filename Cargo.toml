@@ -1,7 +1,13 @@
 [package]
-name = "led-statusboard"
+name = "rustic-pixel-display"
 version = "0.1.0"
 edition = "2021"
+description = "Driver for RGB LED matrices that displays things like real time location, transit, stocks, etc."
+keywords = ["rgb", "matrix", "pixel", "display"]
+readme = "README.md"
+repository = "https://github.com/StefanBossbaly/rustic-pixel-display"
+authors = ["Stefan Bossbaly <sbossb@gmail.com>"]
+license = "GPL"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

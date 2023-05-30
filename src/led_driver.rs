@@ -1,6 +1,7 @@
 use crate::{config, render::Render};
 use anyhow::{anyhow, Context, Result};
 use bus::{Bus, BusReader};
+use log::{debug, trace, warn};
 use rpi_led_panel::{Canvas, RGBMatrix};
 use std::{
     fs::File,
@@ -18,8 +19,9 @@ use std::{io::BufReader, thread};
 #[derive(Debug, Clone)]
 pub(crate) enum RxEvent {
     UpdateMatrixConfig(config::HardwareConfig),
-    UpdateRenderConfig(),
 }
+
+unsafe impl std::marker::Send for RxEvent {}
 
 #[derive(Debug, Clone)]
 pub(crate) enum TxEvent {
@@ -30,9 +32,9 @@ pub(crate) struct LedDriver {
     /// Flag used to gracefully terminate the render and driver threads
     alive: Arc<AtomicBool>,
     /// Handle to the render thread
-    render_thread_handle: thread::JoinHandle<Result<()>>,
+    render_thread_handle: Option<thread::JoinHandle<Result<()>>>,
     /// Handle to the driver thread
-    driver_thread_handle: thread::JoinHandle<Result<()>>,
+    driver_thread_handle: Option<thread::JoinHandle<Result<()>>>,
 }
 
 impl LedDriver {
@@ -43,8 +45,8 @@ impl LedDriver {
 
         // Bus used to receive events. We will transfer ownership of this bus since we are the sink and the caller will be the source.
         let mut event_bus_rx: Bus<RxEvent> = Bus::new(10);
-        let event_bus_rx_render_reader = event_bus_rx.add_rx();
-        let event_bus_rx_driver_reader = event_bus_rx.add_rx();
+        let mut event_bus_rx_render_reader = event_bus_rx.add_rx();
+        let mut event_bus_rx_driver_reader = event_bus_rx.add_rx();
 
         // Bus used to send events. We will retain ownership of this bus since we are the source and the caller will be the sink.
         let mut event_bus_tx: Bus<TxEvent> = Bus::new(10);
@@ -52,11 +54,11 @@ impl LedDriver {
 
         // Read the configuration from the saved file
         let config = Self::read_config()?;
-        println!("Loaded config from file: {:#?}", config);
+        debug!("Loaded config from file: {:#?}", config);
 
         // Clone variable that will be moved into the thread
         let alive_render = alive.clone();
-        let alive_driver = alive;
+        let alive_driver = alive.clone();
 
         // Channels used to send the canvas between the render and driver threads
         let (driver_to_render_sender, driver_to_render_receiver) =
@@ -98,7 +100,8 @@ impl LedDriver {
                 match event_bus_rx_driver_reader.try_recv() {
                     Ok(rx_event) => match rx_event {
                         RxEvent::UpdateMatrixConfig(rx_config) => {
-                            println!("Updating config: {:#?}", rx_config);
+                            debug!("Updating config: {:#?}", rx_config);
+                            let config_event = TxEvent::UpdateConfig(rx_config.clone());
 
                             // Convert into RGBMatrixConfig
                             let hardware_config = rx_config
@@ -111,7 +114,7 @@ impl LedDriver {
                             matrix = Some(result.0);
                             driver_to_render_sender.send(result.1)?;
 
-                            event_bus_tx.broadcast(TxEvent::UpdateConfig(rx_config.clone()));
+                            event_bus_tx.broadcast(config_event);
                         }
                         _ => {}
                     },
@@ -137,13 +140,13 @@ impl LedDriver {
                             break;
                         }
                         Err(RecvTimeoutError::Timeout) => {
-                            println!("Timeout waiting for frame from render");
+                            warn!("Timeout waiting for frame from render");
                             continue;
                         }
                     }
 
                     if step % 120 == 0 {
-                        print!("\r{:>100}\rFramerate: {}", "", matrix.get_framerate());
+                        trace!("\r{:>100}\rFramerate: {}", "", matrix.get_framerate());
                         std::io::stdout().flush().unwrap();
                     }
                     step += 1;
@@ -156,8 +159,8 @@ impl LedDriver {
         Ok((
             Self {
                 alive,
-                render_thread_handle,
-                driver_thread_handle,
+                render_thread_handle: Some(render_thread_handle),
+                driver_thread_handle: Some(driver_thread_handle),
             },
             event_bus_rx,
             event_bus_tx_reader,
@@ -169,13 +172,12 @@ impl LedDriver {
         let home_dir = std::env::var("HOME").context("Can not load HOME environment variable")?;
         let mut file_path = PathBuf::from(home_dir);
         file_path.push(Self::CONFIG_FILE);
-        Ok(File::open(file_path)
-            .with_context(|| format!("Failed to open file {}", Self::CONFIG_FILE))?)
+        File::open(file_path).with_context(|| format!("Failed to open file {}", Self::CONFIG_FILE))
     }
 
     fn read_config() -> Result<config::HardwareConfig> {
         let file_reader = BufReader::new(Self::get_config_file()?);
-        Ok(serde_yaml::from_reader(file_reader).context("Unable to parse YAML file")?)
+        serde_yaml::from_reader(file_reader).context("Unable to parse YAML file")
     }
 
     fn write_config(config: &config::HardwareConfig) -> Result<()> {
@@ -197,14 +199,18 @@ impl Drop for LedDriver {
         // Stop the threads
         alive.store(false, Ordering::SeqCst);
 
-        render_thread_handle
-            .join()
-            .expect("Failed to join the render thread")
-            .expect("Render thread encountered an error");
+        if let Some(render_handle) = render_thread_handle.take() {
+            render_handle
+                .join()
+                .expect("Failed to join the render thread")
+                .expect("Render thread encountered an error");
+        }
 
-        driver_thread_handle
-            .join()
-            .expect("Failed to join the driver thread")
-            .expect("Driver thread encountered an error");
+        if let Some(driver_handle) = driver_thread_handle.take() {
+            driver_handle
+                .join()
+                .expect("Failed to join the driver thread")
+                .expect("Driver thread encountered an error");
+        }
     }
 }

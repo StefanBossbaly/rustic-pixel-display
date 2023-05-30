@@ -1,5 +1,3 @@
-use std::any::Any;
-
 use crate::http_server::Font;
 use anyhow::Result;
 use embedded_graphics::{

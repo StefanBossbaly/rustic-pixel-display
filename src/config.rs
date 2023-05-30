@@ -93,6 +93,8 @@ pub(crate) struct HardwareConfig {
     pub(crate) led_sequence: LedSequence,
 }
 
+unsafe impl std::marker::Send for HardwareConfig {}
+
 impl TryFrom<HardwareConfig> for RGBMatrixConfig {
     type Error = Box<dyn std::error::Error>;
 

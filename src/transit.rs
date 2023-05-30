@@ -92,10 +92,10 @@ impl TransitState {
         }
     }
 
-    fn update_state(mut self, lat: f64, lon: f64, trains: Vec<Train>) -> Result<Self> {
+    fn update_state(mut self, lat_lon: (f64, f64), trains: Vec<Train>) -> Result<Self> {
         // Get the monotonic time
         let now = Instant::now();
-        let person_location = Location::new(lat, lon);
+        let person_location = Location::new(lat_lon.0, lat_lon.1);
 
         self.state = match self.state {
             State::NoStatus(mut tracker) => {
@@ -109,7 +109,7 @@ impl TransitState {
                     let station_location = Location::new(station_lat_lon.0, station_lat_lon.1);
 
                     if person_location
-                        .is_in_circle(&station_location, AT_STATION_ENTER_RADIUS.clone())
+                        .is_in_circle(&station_location, *AT_STATION_ENTER_RADIUS)
                         .expect("is_in_circle failed")
                     {
                         match tracker.station_to_first_encounter.get(&station) {
@@ -121,7 +121,7 @@ impl TransitState {
                             None => {
                                 tracker
                                     .station_to_first_encounter
-                                    .insert(station.clone(), now.clone());
+                                    .insert(station.clone(), now);
                             }
                         }
                     } else {
@@ -186,7 +186,7 @@ impl TransitState {
                 // See if we are still at the current location
                 let mut is_outside_location = false;
                 if person_location
-                    .is_in_circle(&station_location, AT_STATION_LEAVE_RADIUS.clone())
+                    .is_in_circle(&station_location, *AT_STATION_LEAVE_RADIUS)
                     .map_err(|e| anyhow!("distance_to failed: {}", e))?
                 {
                     // We are still at the station, so update the time we have been outside the station
@@ -200,7 +200,7 @@ impl TransitState {
                             }
                         }
                         None => {
-                            tracker.time_outside_station = Some(now.clone());
+                            tracker.time_outside_station = Some(now);
                         }
                     }
                 }
@@ -217,7 +217,7 @@ impl TransitState {
                     'train_loop: for train in trains {
                         let train_location = Location::new(train.lat, train.lon);
                         if person_location
-                            .is_in_circle(&train_location, ON_TRAIN_ENTER_RADIUS.clone())
+                            .is_in_circle(&train_location, *ON_TRAIN_ENTER_RADIUS)
                             .map_err(|e| anyhow!("distance_to failed: {}", e))?
                         {
                             match tracker
@@ -226,22 +226,19 @@ impl TransitState {
                             {
                                 Some(train_encounters) => {
                                     let currently_at_station = person_location
-                                        .is_in_circle(
-                                            &train_location,
-                                            AT_STATION_LEAVE_RADIUS.clone(),
-                                        )
+                                        .is_in_circle(&train_location, *AT_STATION_LEAVE_RADIUS)
                                         .map_err(|e| anyhow!("distance_to failed: {}", e))?;
 
                                     if currently_at_station {
                                         train_encounters.first_encounter_inside_station =
                                             train_encounters
                                                 .first_encounter_inside_station
-                                                .or(Some(now.clone()));
+                                                .or(Some(now));
                                     } else {
                                         train_encounters.first_encounter_outside_station =
                                             train_encounters
                                                 .first_encounter_outside_station
-                                                .or(Some(now.clone()));
+                                                .or(Some(now));
                                     }
 
                                     // We have to have at least one encounter inside the station and one outside the station
@@ -262,22 +259,19 @@ impl TransitState {
                                     };
 
                                     let currently_at_station = person_location
-                                        .is_in_circle(
-                                            &train_location,
-                                            AT_STATION_LEAVE_RADIUS.clone(),
-                                        )
+                                        .is_in_circle(&train_location, *AT_STATION_LEAVE_RADIUS)
                                         .map_err(|e| anyhow!("distance_to failed: {}", e))?;
 
                                     if currently_at_station {
                                         train_encounters.first_encounter_inside_station =
                                             train_encounters
                                                 .first_encounter_inside_station
-                                                .or(Some(now.clone()));
+                                                .or(Some(now));
                                     } else {
                                         train_encounters.first_encounter_outside_station =
                                             train_encounters
                                                 .first_encounter_outside_station
-                                                .or(Some(now.clone()));
+                                                .or(Some(now));
                                     }
 
                                     tracker
@@ -302,7 +296,7 @@ impl TransitState {
                             );
                             State::OnTrain(TrainTracker {
                                 train_id,
-                                last_train_encounter: now.clone(),
+                                last_train_encounter: now,
                             })
                         }
                         None => State::AtStation(tracker),
@@ -319,10 +313,10 @@ impl TransitState {
                     Some(train) => {
                         let train_location = Location::new(train.lat, train.lon);
                         if person_location
-                            .is_in_circle(&train_location, ON_TRAIN_REMAIN_RADIUS.clone())
+                            .is_in_circle(&train_location, *ON_TRAIN_REMAIN_RADIUS)
                             .map_err(|e| anyhow!("distance_to failed: {}", e))?
                         {
-                            tracker.last_train_encounter = now.clone();
+                            tracker.last_train_encounter = now;
                             State::OnTrain(tracker)
                         } else if tracker.last_train_encounter - now > ON_TRAIN_TO_NO_STATUS_TIMEOUT
                         {
@@ -334,10 +328,7 @@ impl TransitState {
                                         Location::new(lat, lon)
                                     };
                                     if person_location
-                                        .is_in_circle(
-                                            &station_location,
-                                            AT_STATION_ENTER_RADIUS.clone(),
-                                        )
+                                        .is_in_circle(&station_location, *AT_STATION_ENTER_RADIUS)
                                         .map_err(|e| anyhow!("distance_to failed: {}", e))?
                                     {
                                         regional_rail_stop = Some(station);
@@ -380,5 +371,25 @@ impl TransitState {
         };
 
         Ok(self)
+    }
+}
+
+struct TransitTracker {
+    client: septa_api::Client,
+    states: HashMap<String, TransitState>,
+}
+
+impl TransitTracker {
+    fn new(people: Vec<String>) -> Self {
+        let mut states = HashMap::new();
+
+        for person in people {
+            states.insert(person, TransitState::new());
+        }
+
+        Self {
+            client: septa_api::Client::new(),
+            states,
+        }
     }
 }

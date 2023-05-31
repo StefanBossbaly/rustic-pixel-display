@@ -71,7 +71,9 @@ impl LedDriver {
             while alive_render.load(Ordering::SeqCst) {
                 match event_bus_rx_render_reader.try_recv() {
                     Ok(event) => match event {
-                        _ => {}
+                        _ => {
+                            println!("Have to implement");
+                        }
                     },
                     Err(x) => match x {
                         std::sync::mpsc::TryRecvError::Disconnected => {
@@ -116,7 +118,9 @@ impl LedDriver {
 
                             event_bus_tx.broadcast(config_event);
                         }
-                        _ => {}
+                        _ => {
+                            println!("Have to implement");
+                        }
                     },
                     Err(x) => match x {
                         std::sync::mpsc::TryRecvError::Disconnected => {

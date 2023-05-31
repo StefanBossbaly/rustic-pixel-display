@@ -238,9 +238,14 @@ impl From<Font> for mono_font::MonoFont<'static> {
 }
 
 #[get("/config")]
-fn configuration(_bus_state: &State<BusState>) -> Template {
-    // TODO: Load a saved config
-    let config: Option<config::HardwareConfig> = None;
+async fn configuration(bus_state_holder: &State<BusState>) -> Template {
+    // Unlock the bus state and clone the current configuration. We could
+    // avoid the clone by holding the lock while we convert but it could
+    // possible cause contention issues.
+    let config = {
+        let bus_state = bus_state_holder.0.lock().await;
+        bus_state.current_config.clone()
+    };
 
     match config {
         None => Template::render("config", Context::default()),
@@ -322,6 +327,11 @@ async fn submit_configuration<'r>(
     (form.context.status(), template)
 }
 
+#[get("/location-config")]
+fn location_config() -> Template {
+    Template::render("location-config", Context::default())
+}
+
 #[get("/debug_text")]
 fn debug_text() -> Template {
     Template::render("debug_text", &Context::default())
@@ -383,7 +393,8 @@ pub(crate) fn build_rocket(
                 configuration,
                 submit_configuration,
                 debug_text,
-                submit_debug_text
+                submit_debug_text,
+                location_config
             ],
         )
         .mount("/", FileServer::from(relative!("/static")))

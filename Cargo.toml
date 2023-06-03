@@ -27,6 +27,7 @@ strum_macros = "0.24"
 anyhow = "1.0.71"
 bus = "2.4.0"
 septa-api = { git = "https://github.com/StefanBossbaly/septa-api.git", branch = "master" }
+home-assistant-rest = { git = "https://github.com/StefanBossbaly/home-assistant-rest.git", branch = "master" }
 geoutils = "0.5.1"
 lazy_static = "1.4.0"
 log = "0.4.18"

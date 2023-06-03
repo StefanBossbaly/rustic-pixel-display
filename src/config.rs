@@ -132,3 +132,10 @@ impl TryFrom<HardwareConfig> for RGBMatrixConfig {
         })
     }
 }
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub(crate) struct TransitConfig {
+    pub(crate) home_assistant_url: String,
+    pub(crate) home_assistant_bearer_token: String,
+    pub(crate) person_entity_id: String,
+}

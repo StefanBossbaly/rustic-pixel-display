@@ -1,3 +1,4 @@
+use crate::config::TransitConfig;
 use crate::render::DebugTextConfig;
 use crate::{
     config,
@@ -237,6 +238,39 @@ impl From<Font> for mono_font::MonoFont<'static> {
     }
 }
 
+#[derive(Debug, FromForm, Serialize)]
+#[allow(dead_code)]
+struct TransitConfigForm<'a> {
+    #[field()]
+    home_assistant_url: &'a str,
+
+    #[field()]
+    home_assistant_bearer_token: &'a str,
+
+    #[field()]
+    person_entity_id: &'a str,
+}
+
+impl<'a> TryFrom<&TransitConfigForm<'a>> for TransitConfig {
+    type Error = Box<dyn std::error::Error>;
+
+    fn try_from(form: &TransitConfigForm<'a>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            home_assistant_url: form.home_assistant_url.to_string(),
+            home_assistant_bearer_token: form.home_assistant_bearer_token.to_string(),
+            person_entity_id: form.person_entity_id.to_string(),
+        })
+    }
+}
+
+struct BusStateHolder {
+    tx_bus: Bus<RxEvent>,
+    rx_bus_reader: BusReader<TxEvent>,
+    current_config: Option<config::HardwareConfig>,
+}
+
+struct BusState(Arc<Mutex<BusStateHolder>>);
+
 #[get("/config")]
 async fn configuration(bus_state_holder: &State<BusState>) -> Template {
     // Unlock the bus state and clone the current configuration. We could
@@ -291,14 +325,6 @@ async fn configuration(bus_state_holder: &State<BusState>) -> Template {
     }
 }
 
-struct BusStateHolder {
-    tx_bus: Bus<RxEvent>,
-    rx_bus_reader: BusReader<TxEvent>,
-    current_config: Option<config::HardwareConfig>,
-}
-
-struct BusState(Arc<Mutex<BusStateHolder>>);
-
 #[post("/config", data = "<form>")]
 async fn submit_configuration<'r>(
     form: Form<Contextual<'r, HardwareConfigForm<'r>>>,
@@ -327,9 +353,25 @@ async fn submit_configuration<'r>(
     (form.context.status(), template)
 }
 
-#[get("/location-config")]
-fn location_config() -> Template {
-    Template::render("location-config", Context::default())
+#[get("/transit_config")]
+fn transit_config() -> Template {
+    Template::render("transit_config", Context::default())
+}
+
+#[post("/transit_config", data = "<form>")]
+async fn submit_transit_config<'r>(
+    form: Form<Contextual<'r, TransitConfigForm<'r>>>,
+) -> (Status, Template) {
+    let template = match form.value {
+        Some(ref submission) => {
+            println!("submission: {:#?}", submission);
+
+            Template::render("transit_config", &form.context)
+        }
+        None => Template::render("transit_config", &form.context),
+    };
+
+    (form.context.status(), template)
 }
 
 #[get("/debug_text")]
@@ -394,7 +436,8 @@ pub(crate) fn build_rocket(
                 submit_configuration,
                 debug_text,
                 submit_debug_text,
-                location_config
+                transit_config,
+                submit_transit_config
             ],
         )
         .mount("/", FileServer::from(relative!("/static")))

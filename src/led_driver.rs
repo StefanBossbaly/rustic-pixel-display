@@ -119,7 +119,7 @@ impl LedDriver {
                             event_bus_tx.broadcast(config_event);
                         }
                         _ => {
-                            println!("Have to implement");
+                            todo!()
                         }
                     },
                     Err(x) => match x {

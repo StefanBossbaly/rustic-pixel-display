@@ -1,12 +1,19 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use geoutils::{Distance, Location};
 use log::debug;
 use septa_api::{responses::Train, types::RegionalRailStop};
 use std::{
     collections::HashMap,
+    error::Error,
+    fs::File,
+    io::BufReader,
+    path::PathBuf,
     time::{Duration, Instant},
 };
 use strum::IntoEnumIterator;
+use tokio::join;
+
+use crate::config::TransitConfig;
 
 /// The amount of time the user has to be within the radius of a station to be considered at the station.
 const NO_STATUS_TO_AT_STATION: Duration = Duration::from_secs(60);
@@ -80,24 +87,34 @@ enum State {
 }
 
 pub(crate) struct TransitState {
-    state: State,
+    state: Option<State>,
 }
 
 impl TransitState {
     fn new() -> Self {
-        Self {
-            state: State::NoStatus(NoStatusTracker {
-                station_to_first_encounter: HashMap::new(),
-            }),
-        }
+        Self { state: None }
     }
 
-    fn update_state(mut self, lat_lon: (f64, f64), trains: Vec<Train>) -> Result<Self> {
+    fn update_state(&mut self, lat_lon: (f64, f64), trains: Vec<Train>) -> Result<()> {
         // Get the monotonic time
         let now = Instant::now();
         let person_location = Location::new(lat_lon.0, lat_lon.1);
 
-        self.state = match self.state {
+        // We will now take ownership of self.state into the local state value. Since it
+        // possible for self.state to be None, we will populate that with a State::NoStatus
+        // since it means that this is the first time this function was called. Once we have
+        // the state moved out we are now able to reassign self.state to the new value in the
+        // state machine. The Option allows us to use &mut self instead of mut self where we
+        // consume the current instance and then have to result Self as a result. I also prefer
+        // this way over using std::memory::replace(), that function, even though it is safe, seems
+        // like a can of worms that once opened won't be able to be closed easily. Using .take() on
+        // the Option is more idiomatic Rust.
+        let state = match self.state.take() {
+            Some(state) => state,
+            None => State::NoStatus(NoStatusTracker::default()),
+        };
+
+        self.state = Some(match state {
             State::NoStatus(mut tracker) => {
                 let mut eligible_stations = Vec::new();
 
@@ -368,28 +385,81 @@ impl TransitState {
                     }),
                 }
             }
-        };
+        });
 
-        Ok(self)
+        Ok(())
     }
 }
 
-struct TransitTracker {
-    client: septa_api::Client,
-    states: HashMap<String, TransitState>,
+pub(crate) struct TransitTracker {
+    septa_client: septa_api::Client,
+    home_assistant_client: home_assistant_rest::Client,
+    home_assistant_entity_id: String,
+    state: TransitState,
 }
 
 impl TransitTracker {
-    fn new(people: Vec<String>) -> Self {
-        let mut states = HashMap::new();
+    const CONFIG_FILE: &'static str = "transit.yaml";
 
-        for person in people {
-            states.insert(person, TransitState::new());
-        }
+    fn get_config_file() -> Result<File> {
+        let home_dir = std::env::var("HOME").context("Can not load HOME environment variable")?;
+        let mut file_path = PathBuf::from(home_dir);
+        file_path.push(Self::CONFIG_FILE);
+        File::open(file_path).with_context(|| format!("Failed to open file {}", Self::CONFIG_FILE))
+    }
 
-        Self {
-            client: septa_api::Client::new(),
-            states,
+    fn read_config() -> Result<TransitConfig> {
+        let file_reader = BufReader::new(Self::get_config_file()?);
+        serde_yaml::from_reader(file_reader).context("Unable to parse YAML file")
+    }
+
+    pub(crate) fn new(config: TransitConfig) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            septa_client: septa_api::Client::new(),
+            home_assistant_client: home_assistant_rest::Client::new(
+                &config.home_assistant_url,
+                &config.home_assistant_bearer_token,
+            )?,
+            home_assistant_entity_id: config.person_entity_id.clone(),
+            state: TransitState::new(),
+        })
+    }
+
+    pub(crate) fn from_config() -> Result<Self, Box<dyn Error>> {
+        Self::new(Self::read_config()?)
+    }
+
+    async fn get_user_location(&self) -> Result<(f64, f64)> {
+        let entity_state = self
+            .home_assistant_client
+            .get_states_of_entity(&self.home_assistant_entity_id)
+            .await?;
+
+        if let (Some(lat), Some(lon)) = (
+            entity_state.attributes.get("latitude"),
+            entity_state.attributes.get("longitude"),
+        ) {
+            if let (Some(lat_f64), Some(lon_f64)) = (lat.as_f64(), lon.as_f64()) {
+                Ok((lat_f64, lon_f64))
+            } else {
+                Err(anyhow!("Could not match lat lng"))
+            }
+        } else {
+            Err(anyhow!("Could not match lat lng"))
         }
+    }
+
+    pub(crate) async fn update(&mut self) -> Result<(), Box<dyn Error>> {
+        let trains_request = self.septa_client.train_view();
+        let user_location_request = self.get_user_location();
+
+        let (trains_result, user_location_result) = join!(trains_request, user_location_request);
+
+        let trains = trains_result?;
+        let user_location = user_location_result?;
+
+        self.state.update_state(user_location, trains)?;
+
+        Ok(())
     }
 }

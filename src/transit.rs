@@ -1,4 +1,12 @@
+use crate::{config::TransitConfig, render::Render};
 use anyhow::{anyhow, Context, Result};
+use embedded_graphics::{
+    mono_font::{self, MonoTextStyle},
+    pixelcolor::Rgb888,
+    prelude::{Point, RgbColor},
+    text::{Alignment, Text},
+    Drawable,
+};
 use geoutils::{Distance, Location};
 use log::debug;
 use septa_api::{responses::Train, types::RegionalRailStop};
@@ -8,12 +16,14 @@ use std::{
     fs::File,
     io::BufReader,
     path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 use strum::IntoEnumIterator;
-use tokio::join;
-
-use crate::config::TransitConfig;
+use tokio::{join, task::JoinHandle};
 
 /// The amount of time the user has to be within the radius of a station to be considered at the station.
 const NO_STATUS_TO_AT_STATION: Duration = Duration::from_secs(60);
@@ -391,14 +401,15 @@ impl TransitState {
     }
 }
 
-pub(crate) struct TransitTracker {
-    septa_client: septa_api::Client,
-    home_assistant_client: home_assistant_rest::Client,
-    home_assistant_entity_id: String,
-    state: TransitState,
+pub(crate) struct TransitRender {
+    state: Arc<Mutex<TransitState>>,
+    /// Flag used to gracefully terminate the render and driver threads
+    alive: Arc<AtomicBool>,
+    /// Handle to the task used to update the SEPTA and User location
+    update_task_handle: Option<JoinHandle<Result<()>>>,
 }
 
-impl TransitTracker {
+impl TransitRender {
     const CONFIG_FILE: &'static str = "transit.yaml";
 
     fn get_config_file() -> Result<File> {
@@ -413,26 +424,12 @@ impl TransitTracker {
         serde_yaml::from_reader(file_reader).context("Unable to parse YAML file")
     }
 
-    pub(crate) fn new(config: TransitConfig) -> Result<Self, Box<dyn Error>> {
-        Ok(Self {
-            septa_client: septa_api::Client::new(),
-            home_assistant_client: home_assistant_rest::Client::new(
-                &config.home_assistant_url,
-                &config.home_assistant_bearer_token,
-            )?,
-            home_assistant_entity_id: config.person_entity_id.clone(),
-            state: TransitState::new(),
-        })
-    }
-
-    pub(crate) fn from_config() -> Result<Self, Box<dyn Error>> {
-        Self::new(Self::read_config()?)
-    }
-
-    async fn get_user_location(&self) -> Result<(f64, f64)> {
-        let entity_state = self
-            .home_assistant_client
-            .get_states_of_entity(&self.home_assistant_entity_id)
+    async fn get_location(
+        home_assistant_client: &home_assistant_rest::Client,
+        config: &TransitConfig,
+    ) -> Result<(f64, f64)> {
+        let entity_state = home_assistant_client
+            .get_states_of_entity(&config.person_entity_id)
             .await?;
 
         if let (Some(lat), Some(lon)) = (
@@ -449,17 +446,111 @@ impl TransitTracker {
         }
     }
 
-    pub(crate) async fn update(&mut self) -> Result<(), Box<dyn Error>> {
-        let trains_request = self.septa_client.train_view();
-        let user_location_request = self.get_user_location();
+    pub(crate) fn new(config: TransitConfig) -> Result<Self, Box<dyn Error>> {
+        let septa_client = septa_api::Client::new();
+        let home_assistant_client = home_assistant_rest::Client::new(
+            &config.home_assistant_url,
+            &config.home_assistant_bearer_token,
+        )?;
 
-        let (trains_result, user_location_result) = join!(trains_request, user_location_request);
+        let state = Arc::new(Mutex::new(TransitState::new()));
+        let alive = Arc::new(AtomicBool::new(true));
 
-        let trains = trains_result?;
-        let user_location = user_location_result?;
+        // Clone the shared data since it will be moved onto the task
+        let task_state = state.clone();
+        let task_alive = alive.clone();
 
-        self.state.update_state(user_location, trains)?;
+        let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
+            while task_alive.load(Ordering::SeqCst) {
+                let trains_request = septa_client.train_view();
+                let user_location_request = Self::get_location(&home_assistant_client, &config);
+
+                let (trains_result, user_location_result) =
+                    join!(trains_request, user_location_request);
+
+                let user_location = user_location_result?;
+                let trains = trains_result?;
+
+                {
+                    let mut state_unlocked = task_state
+                        .lock()
+                        .map_err(|e| anyhow!("Mutex error: {}", e))?;
+                    state_unlocked.update_state(user_location, trains)?;
+                }
+            }
+
+            Ok(())
+        });
+
+        Ok(Self {
+            state,
+            alive,
+            update_task_handle: Some(update_task_handle),
+        })
+    }
+
+    pub(crate) fn from_config() -> Result<Self, Box<dyn Error>> {
+        Self::new(Self::read_config()?)
+    }
+}
+
+impl Render for TransitRender {
+    fn render(&self, canvas: &mut rpi_led_panel::Canvas) -> Result<()> {
+        let state_unlocked = self
+            .state
+            .lock()
+            .map_err(|e| anyhow!("Mutex error: {}", e))?;
+
+        if let Some(ref state) = state_unlocked.state {
+            match state {
+                State::NoStatus(_) => {
+                    let font: mono_font::MonoFont<'static> = mono_font::ascii::FONT_6X10;
+                    let text = Text::with_alignment(
+                        "No Status",
+                        Point::new(0, 20),
+                        MonoTextStyle::new(&font, Rgb888::WHITE),
+                        Alignment::Left,
+                    );
+
+                    text.draw(canvas)?;
+                }
+                State::OnTrain(ref tracker) => {
+                    let text = format!("On Train {}", tracker.train_id);
+                    let font: mono_font::MonoFont<'static> = mono_font::ascii::FONT_6X10;
+                    let text = Text::with_alignment(
+                        text.as_str(),
+                        Point::new(0, 20),
+                        MonoTextStyle::new(&font, Rgb888::WHITE),
+                        Alignment::Left,
+                    );
+
+                    text.draw(canvas)?;
+                }
+                State::AtStation(ref tracker) => {
+                    let text = format!("At Station {}", tracker.station.to_string());
+                    let font: mono_font::MonoFont<'static> = mono_font::ascii::FONT_6X10;
+                    let text = Text::with_alignment(
+                        text.as_str(),
+                        Point::new(0, 20),
+                        MonoTextStyle::new(&font, Rgb888::WHITE),
+                        Alignment::Left,
+                    );
+
+                    text.draw(canvas)?;
+                }
+            }
+        }
 
         Ok(())
+    }
+}
+
+impl Drop for TransitRender {
+    fn drop(&mut self) {
+        self.alive.store(false, Ordering::SeqCst);
+
+        if let Some(task_handle) = self.update_task_handle.take() {
+            task_handle.abort();
+        }
     }
 }

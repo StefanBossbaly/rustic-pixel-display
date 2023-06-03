@@ -1,10 +1,15 @@
+// TODO: Remove once code is more stable
+#![allow(dead_code)]
+
 #[macro_use]
 extern crate lazy_static;
 
 use anyhow::anyhow;
 use anyhow::Result;
 use led_driver::LedDriver;
-use render::DebugTextRender;
+use tokio::signal;
+
+use crate::transit::TransitRender;
 
 #[cfg(feature = "http_server")]
 mod http_server;
@@ -20,31 +25,25 @@ mod transit;
 
 #[rocket::main]
 async fn main() -> Result<()> {
-    let render = Box::new(DebugTextRender::new());
+    let transit_render = Box::new(
+        TransitRender::from_config()
+            .map_err(|e| anyhow!("Failed to create transit tracker: {e}"))?,
+    );
+    let led_driver = LedDriver::new(transit_render)?;
 
-    let (_led_driver, tx_bus, rx_bus_reader) = LedDriver::new(render)?;
-
-    let mut transit_tracker = transit::TransitTracker::from_config()
-        .map_err(|e| anyhow!("Failed to create transit tracker"))?;
-
-    tokio::spawn(async move {
-        loop {
-            transit_tracker
-                .update()
-                .await
-                .map_err(|e| anyhow!("Failed to update transit tracker {e}"))
-                .unwrap();
-
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-        }
-    });
-
-    #[cfg(feature = "http_server")]
-    http_server::build_rocket(tx_bus, rx_bus_reader)
+    tokio::select! {
+        _ = signal::ctrl_c() => {
+            println!("Ctrl+C received!");
+        },
+        _ = http_server::build_rocket()
         .ignite()
         .await?
-        .launch()
-        .await?;
+        .launch() => {
+            println!("HTTP server exited!");
+        },
+    }
+
+    drop(led_driver);
 
     Ok(())
 }

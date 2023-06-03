@@ -16,7 +16,7 @@ use rocket::{
 use rocket_dyn_templates::{context, Template};
 use serde::Serialize;
 use std::{str::FromStr, sync::Arc};
-use tokio::{sync::Mutex, task};
+use tokio::sync::Mutex;
 
 #[derive(Debug, FromForm, Serialize)]
 #[allow(dead_code)]
@@ -395,39 +395,7 @@ fn submit_debug_text<'a>(form: Form<Contextual<'a, DebugTextForm<'a>>>) -> (Stat
     (form.context.status(), template)
 }
 
-pub(crate) fn build_rocket(
-    tx_bus: Bus<RxEvent>,
-    rx_bus_reader: BusReader<TxEvent>,
-) -> Rocket<Build> {
-    let bus_holder = Arc::new(Mutex::new(BusStateHolder {
-        tx_bus,
-        rx_bus_reader,
-        current_config: None,
-    }));
-
-    let thread_bus_holder = bus_holder.clone();
-
-    task::spawn(async move {
-        loop {
-            {
-                let mut bus_holder_unlocked = thread_bus_holder.lock().await;
-                match bus_holder_unlocked.rx_bus_reader.try_recv() {
-                    Ok(event) => match event {
-                        TxEvent::UpdateConfig(config) => {
-                            bus_holder_unlocked.current_config = Some(config);
-                        }
-                    },
-                    Err(error) => match error {
-                        std::sync::mpsc::TryRecvError::Empty => {}
-                        std::sync::mpsc::TryRecvError::Disconnected => break,
-                    },
-                }
-            } // drop(bus_holder_unlocked)
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        }
-    });
-
+pub(crate) fn build_rocket() -> Rocket<Build> {
     rocket::build()
         .mount(
             "/",
@@ -442,5 +410,4 @@ pub(crate) fn build_rocket(
         )
         .mount("/", FileServer::from(relative!("/static")))
         .attach(Template::fairing())
-        .manage(BusState(bus_holder))
 }

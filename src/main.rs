@@ -4,14 +4,12 @@
 #[macro_use]
 extern crate lazy_static;
 
-use anyhow::anyhow;
-use anyhow::Result;
+use crate::transit::TransitRender;
+use anyhow::{anyhow, Result};
 use led_driver::LedDriver;
 use log::Metadata;
 use log::Record;
 use tokio::signal;
-
-use crate::transit::TransitRender;
 
 #[cfg(feature = "http_server")]
 mod http_server;
@@ -42,27 +40,34 @@ impl log::Log for MyLogger {
     fn flush(&self) {}
 }
 
-#[rocket::main]
+#[tokio::main]
 async fn main() -> Result<()> {
+    log::set_max_level(log::LevelFilter::Debug);
+    log::set_logger(&MY_LOGGER)?;
+
     let transit_render: Box<TransitRender> = Box::new(
         TransitRender::from_config()
             .map_err(|e| anyhow!("Failed to create transit tracker: {e}"))?,
     );
-    let led_driver = LedDriver::new(transit_render)?;
 
-    log::set_max_level(log::LevelFilter::Debug);
-    log::set_logger(&MY_LOGGER)?;
+    let (http_to_driver_sender, http_to_driver_receiver) = std::sync::mpsc::channel();
+    let (driver_to_http_sender, driver_to_http_receiver) = std::sync::mpsc::channel();
+
+    let led_driver = LedDriver::new(
+        transit_render,
+        Some((driver_to_http_sender, http_to_driver_receiver)),
+    )?;
 
     tokio::select! {
         _ = signal::ctrl_c() => {
             println!("Ctrl+C received!");
         },
-        // _ = http_server::build_rocket()
-        // .ignite()
-        // .await?
-        // .launch() => {
-        //     println!("HTTP server exited!");
-        // },
+        _ = http_server::build_rocket(http_to_driver_sender, driver_to_http_receiver)
+        .ignite()
+        .await?
+        .launch() => {
+            println!("HTTP server exited!");
+        },
     }
 
     drop(led_driver);

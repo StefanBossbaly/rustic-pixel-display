@@ -8,7 +8,8 @@ use embedded_graphics::{
     Drawable,
 };
 use geoutils::{Distance, Location};
-use log::debug;
+use home_assistant_rest::get::StateEnum;
+use log::{debug, warn};
 use septa_api::{responses::Train, types::RegionalRailStop};
 use std::{
     collections::HashMap,
@@ -96,6 +97,7 @@ enum State {
     OnTrain(TrainTracker),
 }
 
+#[derive(Default)]
 pub(crate) struct TransitState {
     state: Option<State>,
 }
@@ -401,8 +403,15 @@ impl TransitState {
     }
 }
 
+#[derive(Default)]
+struct StateHolder {
+    transit_state: TransitState,
+    person_name: Option<String>,
+    person_state: Option<String>,
+}
+
 pub(crate) struct TransitRender {
-    state: Arc<Mutex<TransitState>>,
+    state: Arc<Mutex<StateHolder>>,
     /// Flag used to gracefully terminate the render and driver threads
     alive: Arc<AtomicBool>,
     /// Handle to the task used to update the SEPTA and User location
@@ -427,17 +436,43 @@ impl TransitRender {
     async fn get_location(
         home_assistant_client: &home_assistant_rest::Client,
         config: &TransitConfig,
-    ) -> Result<(f64, f64)> {
+    ) -> Result<(Option<String>, Option<String>, f64, f64)> {
         let entity_state = home_assistant_client
             .get_states_of_entity(&config.person_entity_id)
             .await?;
+
+        // Attempt to get the person's name
+        let person_name = if let Some(state_value) = entity_state.attributes.get("friendly_name") {
+            if let Some(value) = state_value.as_str() {
+                Some(value.to_owned())
+            } else {
+                warn!("Could not parse 'friendly_name' as str");
+                None
+            }
+        } else {
+            warn!("Could find 'friendly_name' in attributes");
+            None
+        };
+
+        // Attempt to get the person's state
+        let person_state = if let Some(state_value) = entity_state.state {
+            if let StateEnum::String(value) = state_value {
+                Some(value)
+            } else {
+                warn!("Could not parse 'state' as str");
+                None
+            }
+        } else {
+            warn!("{}'s 'state' was not provided", config.person_entity_id);
+            None
+        };
 
         if let (Some(lat), Some(lon)) = (
             entity_state.attributes.get("latitude"),
             entity_state.attributes.get("longitude"),
         ) {
             if let (Some(lat_f64), Some(lon_f64)) = (lat.as_f64(), lon.as_f64()) {
-                Ok((lat_f64, lon_f64))
+                Ok((person_name, person_state, lat_f64, lon_f64))
             } else {
                 Err(anyhow!("Could not match lat lng"))
             }
@@ -453,11 +488,11 @@ impl TransitRender {
             &config.home_assistant_bearer_token,
         )?;
 
-        let state = Arc::new(Mutex::new(TransitState::new()));
+        let state_holder = Arc::new(Mutex::new(StateHolder::default()));
         let alive = Arc::new(AtomicBool::new(true));
 
         // Clone the shared data since it will be moved onto the task
-        let task_state = state.clone();
+        let task_state_holder = state_holder.clone();
         let task_alive = alive.clone();
 
         let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
@@ -468,15 +503,20 @@ impl TransitRender {
                 let (trains_result, user_location_result) =
                     join!(trains_request, user_location_request);
 
-                let user_location = user_location_result?;
+                let (person_name, person_state, user_loc_lat, user_loc_lon) = user_location_result?;
                 let trains = trains_result?;
 
                 {
-                    let mut state_unlocked = task_state
+                    let mut holder_unlocked = task_state_holder
                         .lock()
                         .map_err(|e| anyhow!("Mutex error: {}", e))?;
-                    state_unlocked.update_state(user_location, trains)?;
-                }
+                    holder_unlocked
+                        .transit_state
+                        .update_state((user_loc_lat, user_loc_lon), trains)?;
+
+                    holder_unlocked.person_name = person_name;
+                    holder_unlocked.person_state = person_state;
+                } // drop(holder_unlocked)
 
                 tokio::time::sleep(Duration::from_secs(15)).await;
             }
@@ -485,7 +525,7 @@ impl TransitRender {
         });
 
         Ok(Self {
-            state,
+            state: state_holder,
             alive,
             update_task_handle: Some(update_task_handle),
         })
@@ -503,46 +543,44 @@ impl Render for TransitRender {
             .lock()
             .map_err(|e| anyhow!("Mutex error: {}", e))?;
 
-        if let Some(ref state) = state_unlocked.state {
+        if let Some(ref state) = state_unlocked.transit_state.state {
             canvas.fill(0, 0, 0);
 
-            match state {
-                State::NoStatus(_) => {
-                    let font: mono_font::MonoFont<'static> = mono_font::ascii::FONT_6X10;
-                    let text = Text::with_alignment(
-                        "No Status",
-                        Point::new(0, 20),
-                        MonoTextStyle::new(&font, Rgb888::WHITE),
-                        Alignment::Left,
-                    );
+            // Render the name of the person
+            let name = match state_unlocked.person_name {
+                Some(ref name) => name,
+                None => "Unknown",
+            };
 
-                    text.draw(canvas)?;
+            Text::with_alignment(
+                name,
+                Point::new(0, 15),
+                MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
+                Alignment::Left,
+            )
+            .draw(canvas)?;
+
+            let status_text = match state {
+                State::NoStatus(_) => {
+                    if let Some(ref state) = state_unlocked.person_state {
+                        state.to_owned()
+                    } else {
+                        "Unknown".to_owned()
+                    }
                 }
                 State::AtStation(ref tracker) => {
-                    let text = format!("At Station {}", tracker.station.to_string());
-                    let font: mono_font::MonoFont<'static> = mono_font::ascii::FONT_6X10;
-                    let text = Text::with_alignment(
-                        text.as_str(),
-                        Point::new(0, 20),
-                        MonoTextStyle::new(&font, Rgb888::WHITE),
-                        Alignment::Left,
-                    );
-
-                    text.draw(canvas)?;
+                    format!("At Station {}", tracker.station)
                 }
-                State::OnTrain(ref tracker) => {
-                    let text = format!("On Train {}", tracker.train_id);
-                    let font: mono_font::MonoFont<'static> = mono_font::ascii::FONT_6X10;
-                    let text = Text::with_alignment(
-                        text.as_str(),
-                        Point::new(0, 20),
-                        MonoTextStyle::new(&font, Rgb888::WHITE),
-                        Alignment::Left,
-                    );
+                State::OnTrain(ref tracker) => format!("On Train {}", tracker.train_id),
+            };
 
-                    text.draw(canvas)?;
-                }
-            }
+            Text::with_alignment(
+                status_text.as_str(),
+                Point::new(0, 40),
+                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                Alignment::Left,
+            )
+            .draw(canvas)?;
         }
 
         Ok(())

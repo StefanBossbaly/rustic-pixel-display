@@ -4,16 +4,16 @@ use log::{debug, trace, warn};
 use rpi_led_panel::{Canvas, RGBMatrix};
 use std::{
     fs::File,
-    io::{BufWriter, Write},
+    io::{BufReader, BufWriter, Write},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::RecvTimeoutError,
         Arc,
     },
+    thread,
     time::Duration,
 };
-use std::{io::BufReader, thread};
 
 #[derive(Debug, Clone)]
 pub(crate) enum RxEvent {
@@ -22,26 +22,33 @@ pub(crate) enum RxEvent {
 
 unsafe impl std::marker::Send for RxEvent {}
 
-#[derive(Debug, Clone)]
 pub(crate) enum TxEvent {
-    UpdateConfig(config::HardwareConfig),
+    UpdateMatrixConfig(config::HardwareConfig),
 }
+
+unsafe impl std::marker::Send for TxEvent {}
 
 pub(crate) struct LedDriver {
     /// Flag used to gracefully terminate the render and driver threads
     alive: Arc<AtomicBool>,
+
     /// Handle to the render thread
     render_thread_handle: Option<thread::JoinHandle<Result<()>>>,
+
     /// Handle to the driver thread
     driver_thread_handle: Option<thread::JoinHandle<Result<()>>>,
-    /// Channel used to send events to the driver thread
-    driver_event_sender: std::sync::mpsc::Sender<RxEvent>,
 }
 
 impl LedDriver {
     const CONFIG_FILE: &'static str = "led-statusboard.yaml";
 
-    pub(crate) fn new(render: Box<dyn Render>) -> Result<Self> {
+    pub(crate) fn new(
+        render: Box<dyn Render>,
+        event_sender_receiver: Option<(
+            std::sync::mpsc::Sender<TxEvent>,
+            std::sync::mpsc::Receiver<RxEvent>,
+        )>,
+    ) -> Result<Self> {
         let alive = Arc::new(AtomicBool::new(true));
 
         // Read the configuration from the saved file
@@ -57,10 +64,6 @@ impl LedDriver {
             std::sync::mpsc::channel::<Box<Canvas>>();
         let (render_to_driver_sender, render_to_driver_receiver) =
             std::sync::mpsc::channel::<Box<Canvas>>();
-
-        // Channel used to send events to the led driver thread
-        let (event_to_driver_sender, event_to_driver_receiver) =
-            std::sync::mpsc::channel::<RxEvent>();
 
         // Create the render thread
         let render_thread_handle = thread::spawn(move || -> Result<()> {
@@ -83,8 +86,13 @@ impl LedDriver {
         let driver_thread_handle = thread::spawn(move || -> Result<()> {
             let mut matrix;
             let mut step: u64 = 0;
+            let (event_sender, event_receiver) = match event_sender_receiver {
+                Some((sender, receiver)) => (Some(sender), Some(receiver)),
+                None => (None, None),
+            };
 
             // Convert into RGBMatrixConfig
+            let hardware_config_clone = config.clone();
             let hardware_config = config
                 .try_into()
                 .map_err(|e| anyhow!("Can't convert to RGBMatrixConfig {:?}", e))?;
@@ -95,29 +103,46 @@ impl LedDriver {
             matrix = Some(result.0);
             driver_to_render_sender.send(result.1)?;
 
+            // Send the new configuration
+            if let Some(ref sender) = event_sender {
+                sender.send(TxEvent::UpdateMatrixConfig(hardware_config_clone))?;
+            }
+
             while alive_driver.load(Ordering::SeqCst) {
-                match event_to_driver_receiver.try_recv() {
-                    Ok(rx_event) => match rx_event {
-                        RxEvent::UpdateMatrixConfig(rx_config) => {
-                            debug!("Updating config: {:#?}", rx_config);
-                            // Convert into RGBMatrixConfig
-                            let hardware_config = rx_config
-                                .try_into()
-                                .map_err(|e| anyhow!("Can't convert to RGBMatrixConfig {:?}", e))?;
+                // Only process events if provided with a receiver by the caller
+                if let Some(ref event_receiver) = event_receiver {
+                    match event_receiver.try_recv() {
+                        Ok(rx_event) => match rx_event {
+                            RxEvent::UpdateMatrixConfig(rx_config) => {
+                                debug!("Updating config: {:#?}", rx_config);
 
-                            let result = RGBMatrix::new(hardware_config, 0)
-                                .context("Invalid configuration provided")?;
+                                let rx_config_clone = rx_config.clone();
 
-                            matrix = Some(result.0);
-                            driver_to_render_sender.send(result.1)?;
-                        }
-                    },
-                    Err(x) => match x {
-                        std::sync::mpsc::TryRecvError::Disconnected => {
-                            return Err(anyhow!("Disconnected from event bus"));
-                        }
-                        std::sync::mpsc::TryRecvError::Empty => {}
-                    },
+                                // Convert into RGBMatrixConfig
+                                let hardware_config = rx_config.try_into().map_err(|e| {
+                                    anyhow!("Can't convert to RGBMatrixConfig {:?}", e)
+                                })?;
+
+                                let result = RGBMatrix::new(hardware_config, 0)
+                                    .context("Invalid configuration provided")?;
+
+                                // Update the new configuration
+                                matrix = Some(result.0);
+                                driver_to_render_sender.send(result.1)?;
+
+                                // Send the new configuration
+                                if let Some(ref sender) = event_sender {
+                                    sender.send(TxEvent::UpdateMatrixConfig(rx_config_clone))?;
+                                }
+                            }
+                        },
+                        Err(error) => match error {
+                            std::sync::mpsc::TryRecvError::Disconnected => {
+                                return Err(anyhow!("Disconnected from event bus"));
+                            }
+                            std::sync::mpsc::TryRecvError::Empty => {}
+                        },
+                    }
                 }
 
                 if let Some(matrix) = &mut matrix {
@@ -156,7 +181,6 @@ impl LedDriver {
             alive,
             render_thread_handle: Some(render_thread_handle),
             driver_thread_handle: Some(driver_thread_handle),
-            driver_event_sender: event_to_driver_sender,
         })
     }
 

@@ -1,12 +1,10 @@
 use crate::config::TransitConfig;
+use crate::led_driver::TxEvent;
 use crate::render::DebugTextConfig;
-use crate::{
-    config,
-    led_driver::{RxEvent, TxEvent},
-};
+use crate::{config, led_driver::RxEvent};
 use anyhow::Result;
-use bus::{Bus, BusReader};
 use embedded_graphics::mono_font;
+use log::debug;
 use rocket::{
     form::{Context, Contextual, Form, FromForm},
     fs::{relative, FileServer},
@@ -263,23 +261,19 @@ impl<'a> TryFrom<&TransitConfigForm<'a>> for TransitConfig {
     }
 }
 
-struct BusStateHolder {
-    tx_bus: Bus<RxEvent>,
-    rx_bus_reader: BusReader<TxEvent>,
+struct EventStateHolder {
+    driver_sender: std::sync::mpsc::Sender<RxEvent>,
     current_config: Option<config::HardwareConfig>,
 }
 
-struct BusState(Arc<Mutex<BusStateHolder>>);
+struct EventState(Arc<Mutex<EventStateHolder>>);
 
 #[get("/config")]
-async fn configuration(bus_state_holder: &State<BusState>) -> Template {
+async fn configuration(event_state: &State<EventState>) -> Template {
     // Unlock the bus state and clone the current configuration. We could
     // avoid the clone by holding the lock while we convert but it could
     // possible cause contention issues.
-    let config = {
-        let bus_state = bus_state_holder.0.lock().await;
-        bus_state.current_config.clone()
-    };
+    let config = { event_state.0.lock().await.current_config.clone() };
 
     match config {
         None => Template::render("config", Context::default()),
@@ -328,21 +322,23 @@ async fn configuration(bus_state_holder: &State<BusState>) -> Template {
 #[post("/config", data = "<form>")]
 async fn submit_configuration<'r>(
     form: Form<Contextual<'r, HardwareConfigForm<'r>>>,
-    bus_state: &State<BusState>,
+    event_state: &State<EventState>,
 ) -> (Status, Template) {
     let template = match form.value {
         Some(ref submission) => {
-            println!("submission: {:#?}", submission);
+            debug!("Config Submission: {:#?}", submission);
 
             // Broadcast the new configuration to the driver
             let new_config = submission.try_into().expect("Bad conversion");
 
             {
-                let mut bus_state_unlocked = bus_state.0.lock().await;
-
-                bus_state_unlocked
-                    .tx_bus
-                    .broadcast(RxEvent::UpdateMatrixConfig(new_config));
+                event_state
+                    .0
+                    .lock()
+                    .await
+                    .driver_sender
+                    .send(RxEvent::UpdateMatrixConfig(new_config))
+                    .expect("Could not send value");
             } //drop(bus_state_unlocked)
 
             Template::render("config", &form.context)
@@ -395,7 +391,30 @@ fn submit_debug_text<'a>(form: Form<Contextual<'a, DebugTextForm<'a>>>) -> (Stat
     (form.context.status(), template)
 }
 
-pub(crate) fn build_rocket() -> Rocket<Build> {
+pub(crate) fn build_rocket(
+    event_sender: std::sync::mpsc::Sender<RxEvent>,
+    event_receiver: std::sync::mpsc::Receiver<TxEvent>,
+) -> Rocket<Build> {
+    let event_holder = Arc::new(Mutex::new(EventStateHolder {
+        driver_sender: event_sender,
+        current_config: None,
+    }));
+
+    let event_task_holder = event_holder.clone();
+
+    tokio::spawn(async move {
+        loop {
+            let config = match event_receiver.recv() {
+                Ok(event) => match event {
+                    TxEvent::UpdateMatrixConfig(config) => config,
+                },
+                Err(_) => break,
+            };
+
+            event_task_holder.lock().await.current_config = Some(config);
+        }
+    });
+
     rocket::build()
         .mount(
             "/",
@@ -410,4 +429,5 @@ pub(crate) fn build_rocket() -> Rocket<Build> {
         )
         .mount("/", FileServer::from(relative!("/static")))
         .attach(Template::fairing())
+        .manage(EventState(event_holder))
 }

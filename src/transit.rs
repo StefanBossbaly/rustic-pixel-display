@@ -26,7 +26,7 @@ use strum::IntoEnumIterator;
 use tokio::{join, task::JoinHandle};
 
 /// The amount of time the user has to be within the radius of a station to be considered at the station.
-const NO_STATUS_TO_AT_STATION: Duration = Duration::from_secs(60);
+const NO_STATUS_TO_AT_STATION: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Default)]
 struct NoStatusTracker {
@@ -52,7 +52,7 @@ lazy_static! {
 
 /// The amount of time that a user would need to be outside a station's radius to
 /// transition from AtStation to NoStatus.
-const AT_STATION_TO_NO_STATUS_TIMEOUT: Duration = Duration::from_secs(180);
+const AT_STATION_TO_NO_STATUS_TIMEOUT: Duration = Duration::from_secs(60);
 
 // Have to wrap in lazy_static since from_meters is not a const function.
 lazy_static! {
@@ -477,6 +477,8 @@ impl TransitRender {
                         .map_err(|e| anyhow!("Mutex error: {}", e))?;
                     state_unlocked.update_state(user_location, trains)?;
                 }
+
+                tokio::time::sleep(Duration::from_secs(15)).await;
             }
 
             Ok(())
@@ -502,6 +504,8 @@ impl Render for TransitRender {
             .map_err(|e| anyhow!("Mutex error: {}", e))?;
 
         if let Some(ref state) = state_unlocked.state {
+            canvas.fill(0, 0, 0);
+
             match state {
                 State::NoStatus(_) => {
                     let font: mono_font::MonoFont<'static> = mono_font::ascii::FONT_6X10;
@@ -514,8 +518,8 @@ impl Render for TransitRender {
 
                     text.draw(canvas)?;
                 }
-                State::OnTrain(ref tracker) => {
-                    let text = format!("On Train {}", tracker.train_id);
+                State::AtStation(ref tracker) => {
+                    let text = format!("At Station {}", tracker.station.to_string());
                     let font: mono_font::MonoFont<'static> = mono_font::ascii::FONT_6X10;
                     let text = Text::with_alignment(
                         text.as_str(),
@@ -526,8 +530,8 @@ impl Render for TransitRender {
 
                     text.draw(canvas)?;
                 }
-                State::AtStation(ref tracker) => {
-                    let text = format!("At Station {}", tracker.station.to_string());
+                State::OnTrain(ref tracker) => {
+                    let text = format!("On Train {}", tracker.train_id);
                     let font: mono_font::MonoFont<'static> = mono_font::ascii::FONT_6X10;
                     let text = Text::with_alignment(
                         text.as_str(),

@@ -81,8 +81,19 @@ impl LedDriver {
 
         // Create the driver thread
         let driver_thread_handle = thread::spawn(move || -> Result<()> {
-            let mut matrix: Option<RGBMatrix> = None;
+            let mut matrix;
             let mut step: u64 = 0;
+
+            // Convert into RGBMatrixConfig
+            let hardware_config = config
+                .try_into()
+                .map_err(|e| anyhow!("Can't convert to RGBMatrixConfig {:?}", e))?;
+
+            let result =
+                RGBMatrix::new(hardware_config, 0).context("Invalid configuration provided")?;
+
+            matrix = Some(result.0);
+            driver_to_render_sender.send(result.1)?;
 
             while alive_driver.load(Ordering::SeqCst) {
                 match event_to_driver_receiver.try_recv() {

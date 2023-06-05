@@ -10,6 +10,7 @@ use embedded_graphics::{
 use geoutils::{Distance, Location};
 use home_assistant_rest::get::StateEnum;
 use log::{debug, warn};
+use parking_lot::Mutex;
 use septa_api::{responses::Train, types::RegionalRailStop};
 use std::{
     collections::HashMap,
@@ -19,7 +20,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     time::{Duration, Instant},
 };
@@ -507,9 +508,7 @@ impl TransitRender {
                 let trains = trains_result?;
 
                 {
-                    let mut holder_unlocked = task_state_holder
-                        .lock()
-                        .map_err(|e| anyhow!("Mutex error: {}", e))?;
+                    let mut holder_unlocked = task_state_holder.lock();
                     holder_unlocked
                         .transit_state
                         .update_state((user_loc_lat, user_loc_lon), trains)?;
@@ -538,10 +537,7 @@ impl TransitRender {
 
 impl Render for TransitRender {
     fn render(&self, canvas: &mut rpi_led_panel::Canvas) -> Result<()> {
-        let state_unlocked = self
-            .state
-            .lock()
-            .map_err(|e| anyhow!("Mutex error: {}", e))?;
+        let state_unlocked = self.state.lock();
 
         if let Some(ref state) = state_unlocked.transit_state.state {
             canvas.fill(0, 0, 0);

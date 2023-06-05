@@ -4,6 +4,7 @@ use crate::{config, led_driver::RxEvent};
 use anyhow::Result;
 use embedded_graphics::mono_font;
 use log::debug;
+use parking_lot::Mutex;
 use rocket::{
     form::{Context, Contextual, Form, FromForm},
     fs::{relative, FileServer},
@@ -13,7 +14,6 @@ use rocket::{
 use rocket_dyn_templates::{context, Template};
 use serde::Serialize;
 use std::{str::FromStr, sync::Arc};
-use tokio::sync::Mutex;
 
 #[derive(Debug, FromForm, Serialize)]
 #[allow(dead_code)]
@@ -251,7 +251,7 @@ async fn configuration(event_state: &State<EventState>) -> Template {
     // Unlock the bus state and clone the current configuration. We could
     // avoid the clone by holding the lock while we convert but it could
     // possible cause contention issues.
-    let config = { event_state.0.lock().await.current_config.clone() };
+    let config = { event_state.0.lock().current_config.clone() };
 
     match config {
         None => Template::render("config", Context::default()),
@@ -313,7 +313,6 @@ async fn submit_configuration<'r>(
                 event_state
                     .0
                     .lock()
-                    .await
                     .driver_sender
                     .send(RxEvent::UpdateMatrixConfig(new_config))
                     .expect("Could not send value");
@@ -360,15 +359,12 @@ pub(crate) fn build_rocket(
     let event_task_holder = event_holder.clone();
 
     tokio::spawn(async move {
-        loop {
-            let config = match event_receiver.recv() {
-                Ok(event) => match event {
-                    TxEvent::UpdateMatrixConfig(config) => config,
-                },
-                Err(_) => break,
-            };
-
-            event_task_holder.lock().await.current_config = Some(config);
+        while let Ok(event) = event_receiver.recv() {
+            match event {
+                TxEvent::UpdateMatrixConfig(config) => {
+                    event_task_holder.lock().current_config = Some(config);
+                }
+            }
         }
     });
 

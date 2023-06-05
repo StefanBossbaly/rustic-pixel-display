@@ -15,6 +15,9 @@ jobs:
           - ubuntu-latest
         rust:
           - stable
+        features:
+          - ""
+          - "--features http_server"
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Source
@@ -42,9 +45,9 @@ jobs:
 
       - name: Test
         run: |
-          cargo check
-          cargo test --all
+          cargo check --no-default-features ${{ matrix.features }}
+          cargo test --all --no-default-features ${{ matrix.features }}
 
       - name: Build
         run: |
-          cargo build --release
+          cargo build --release --no-default-features ${{ matrix.features }}

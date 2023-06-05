@@ -9,6 +9,8 @@ use anyhow::{anyhow, Result};
 use led_driver::LedDriver;
 use log::Metadata;
 use log::Record;
+
+#[cfg(not(feature = "http_server"))]
 use tokio::signal;
 
 #[cfg(feature = "http_server")]
@@ -50,27 +52,33 @@ async fn main() -> Result<()> {
             .map_err(|e| anyhow!("Failed to create transit tracker: {e}"))?,
     );
 
-    let (http_to_driver_sender, http_to_driver_receiver) = std::sync::mpsc::channel();
-    let (driver_to_http_sender, driver_to_http_receiver) = std::sync::mpsc::channel();
+    #[cfg(feature = "http_server")]
+    {
+        let (http_to_driver_sender, http_to_driver_receiver) = std::sync::mpsc::channel();
+        let (driver_to_http_sender, driver_to_http_receiver) = std::sync::mpsc::channel();
 
-    let led_driver = LedDriver::new(
-        transit_render,
-        Some((driver_to_http_sender, http_to_driver_receiver)),
-    )?;
+        let _led_driver = LedDriver::new(
+            transit_render,
+            Some((driver_to_http_sender, http_to_driver_receiver)),
+        )?;
 
-    tokio::select! {
-        _ = signal::ctrl_c() => {
-            println!("Ctrl+C received!");
-        },
-        _ = http_server::build_rocket(http_to_driver_sender, driver_to_http_receiver)
-        .ignite()
-        .await?
-        .launch() => {
-            println!("HTTP server exited!");
-        },
+        http_server::build_rocket(http_to_driver_sender, driver_to_http_receiver)
+            .ignite()
+            .await?
+            .launch()
+            .await?;
     }
 
-    drop(led_driver);
+    #[cfg(not(feature = "http_server"))]
+    {
+        let _led_driver = LedDriver::new(transit_render, None)?;
+
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                println!("Ctrl+C received!");
+            }
+        }
+    }
 
     Ok(())
 }

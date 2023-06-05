@@ -1,6 +1,5 @@
 use crate::config::TransitConfig;
 use crate::led_driver::TxEvent;
-use crate::render::DebugTextConfig;
 use crate::{config, led_driver::RxEvent};
 use anyhow::Result;
 use embedded_graphics::mono_font;
@@ -134,27 +133,6 @@ impl<'a> TryFrom<&HardwareConfigForm<'a>> for config::HardwareConfig {
             },
             row_setter: config::RowAddressSetterType::from_str(form.row_setter)?,
             led_sequence: config::LedSequence::from_str(form.led_sequence)?,
-        })
-    }
-}
-
-#[derive(Debug, FromForm)]
-struct DebugTextForm<'a> {
-    text: &'a str,
-    x: i32,
-    y: i32,
-    font: Font,
-}
-
-impl<'a> TryFrom<&DebugTextForm<'a>> for DebugTextConfig {
-    type Error = Box<dyn std::error::Error>;
-
-    fn try_from(form: &DebugTextForm<'a>) -> Result<Self, Self::Error> {
-        Ok(Self {
-            text: form.text.to_string(),
-            x: form.x,
-            y: form.y,
-            font: form.font,
         })
     }
 }
@@ -370,27 +348,6 @@ async fn submit_transit_config<'r>(
     (form.context.status(), template)
 }
 
-#[get("/debug_text")]
-fn debug_text() -> Template {
-    Template::render("debug_text", &Context::default())
-}
-
-#[post("/debug_text", data = "<form>")]
-fn submit_debug_text<'a>(form: Form<Contextual<'a, DebugTextForm<'a>>>) -> (Status, Template) {
-    let template = match form.value {
-        Some(ref submission) => {
-            println!("submission: {:#?}", submission);
-
-            // TODO: update the render's configuration
-
-            Template::render("debug_text", &form.context)
-        }
-        None => Template::render("debug_text", &form.context),
-    };
-
-    (form.context.status(), template)
-}
-
 pub(crate) fn build_rocket(
     event_sender: std::sync::mpsc::Sender<RxEvent>,
     event_receiver: std::sync::mpsc::Receiver<TxEvent>,
@@ -421,8 +378,6 @@ pub(crate) fn build_rocket(
             routes![
                 configuration,
                 submit_configuration,
-                debug_text,
-                submit_debug_text,
                 transit_config,
                 submit_transit_config
             ],

@@ -43,7 +43,7 @@ impl LedDriver {
     const CONFIG_FILE: &'static str = "led-statusboard.yaml";
 
     pub(crate) fn new(
-        render: Box<dyn Render>,
+        render: Box<dyn Render + Send + Sync>,
         event_sender_receiver: Option<(
             std::sync::mpsc::Sender<TxEvent>,
             std::sync::mpsc::Receiver<RxEvent>,

@@ -104,13 +104,13 @@ impl LedDriver {
             driver_to_render_sender.send(result.1)?;
 
             // Send the new configuration
-            if let Some(ref sender) = event_sender {
+            if let Some(sender) = &event_sender {
                 sender.send(TxEvent::UpdateMatrixConfig(hardware_config_clone))?;
             }
 
             while alive_driver.load(Ordering::SeqCst) {
                 // Only process events if provided with a receiver by the caller
-                if let Some(ref event_receiver) = event_receiver {
+                if let Some(event_receiver) = &event_receiver {
                     match event_receiver.try_recv() {
                         Ok(rx_event) => match rx_event {
                             RxEvent::UpdateMatrixConfig(rx_config) => {
@@ -131,7 +131,7 @@ impl LedDriver {
                                 driver_to_render_sender.send(result.1)?;
 
                                 // Send the new configuration
-                                if let Some(ref sender) = event_sender {
+                                if let Some(sender) = &event_sender {
                                     sender.send(TxEvent::UpdateMatrixConfig(rx_config_clone))?;
                                 }
                             }

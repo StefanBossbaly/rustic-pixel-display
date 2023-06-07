@@ -98,14 +98,15 @@ enum State {
     OnTrain(TrainTracker),
 }
 
-#[derive(Default)]
 pub(crate) struct TransitState {
     state: Option<State>,
 }
 
 impl TransitState {
     fn new() -> Self {
-        Self { state: None }
+        Self {
+            state: Some(State::NoStatus(NoStatusTracker::default())),
+        }
     }
 
     fn update_state(&mut self, lat_lon: (f64, f64), trains: Vec<Train>) -> Result<()> {
@@ -113,9 +114,7 @@ impl TransitState {
         let now = Instant::now();
         let person_location = Location::new(lat_lon.0, lat_lon.1);
 
-        // We will now take ownership of self.state into the local state value. Since it
-        // possible for self.state to be None, we will populate that with a State::NoStatus
-        // since it means that this is the first time this function was called. Once we have
+        // We will now take ownership of self.state into the local state value. Once we have
         // the state moved out we are now able to reassign self.state to the new value in the
         // state machine. The Option allows us to use &mut self instead of mut self where we
         // consume the current instance and then have to result Self as a result. I also prefer
@@ -404,11 +403,20 @@ impl TransitState {
     }
 }
 
-#[derive(Default)]
 struct StateHolder {
     transit_state: TransitState,
     person_name: Option<String>,
     person_state: Option<String>,
+}
+
+impl StateHolder {
+    fn new() -> Self {
+        Self {
+            transit_state: TransitState::new(),
+            person_name: None,
+            person_state: None,
+        }
+    }
 }
 
 pub(crate) struct TransitRender {
@@ -489,7 +497,7 @@ impl TransitRender {
             &config.home_assistant_bearer_token,
         )?;
 
-        let state_holder = Arc::new(Mutex::new(StateHolder::default()));
+        let state_holder = Arc::new(Mutex::new(StateHolder::new()));
         let alive = Arc::new(AtomicBool::new(true));
 
         // Clone the shared data since it will be moved onto the task
@@ -539,12 +547,12 @@ impl Render for TransitRender {
     fn render(&self, canvas: &mut rpi_led_panel::Canvas) -> Result<()> {
         let state_unlocked = self.state.lock();
 
-        if let Some(ref state) = state_unlocked.transit_state.state {
+        if let Some(state) = &state_unlocked.transit_state.state {
             canvas.fill(0, 0, 0);
 
             // Render the name of the person
-            let name = match state_unlocked.person_name {
-                Some(ref name) => name,
+            let name = match &state_unlocked.person_name {
+                Some(name) => name,
                 None => "Unknown",
             };
 
@@ -558,16 +566,16 @@ impl Render for TransitRender {
 
             let status_text = match state {
                 State::NoStatus(_) => {
-                    if let Some(ref state) = state_unlocked.person_state {
+                    if let Some(state) = &state_unlocked.person_state {
                         state.to_owned()
                     } else {
                         "Unknown".to_owned()
                     }
                 }
-                State::AtStation(ref tracker) => {
+                State::AtStation(tracker) => {
                     format!("At Station {}", tracker.station)
                 }
-                State::OnTrain(ref tracker) => format!("On Train {}", tracker.train_id),
+                State::OnTrain(tracker) => format!("On Train {}", tracker.train_id),
             };
 
             Text::with_alignment(
@@ -577,6 +585,8 @@ impl Render for TransitRender {
                 Alignment::Left,
             )
             .draw(canvas)?;
+        } else {
+            warn!("No state. This should not happen");
         }
 
         Ok(())

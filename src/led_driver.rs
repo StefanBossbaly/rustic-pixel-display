@@ -20,13 +20,9 @@ pub(crate) enum RxEvent {
     UpdateMatrixConfig(config::HardwareConfig),
 }
 
-unsafe impl std::marker::Send for RxEvent {}
-
 pub(crate) enum TxEvent {
     UpdateMatrixConfig(config::HardwareConfig),
 }
-
-unsafe impl std::marker::Send for TxEvent {}
 
 pub(crate) struct LedDriver {
     /// Flag used to gracefully terminate the render and driver threads

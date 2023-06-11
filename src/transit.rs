@@ -1,6 +1,7 @@
 use crate::{config::TransitConfig, render::Render};
 use anyhow::{anyhow, Context, Result};
 use embedded_graphics::{
+    image::Image,
     mono_font::{self, MonoTextStyle},
     pixelcolor::Rgb888,
     prelude::{Point, RgbColor},
@@ -9,7 +10,7 @@ use embedded_graphics::{
 };
 use geoutils::{Distance, Location};
 use home_assistant_rest::get::StateEnum;
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use parking_lot::Mutex;
 use septa_api::{responses::Train, types::RegionalRailStop};
 use std::{
@@ -25,6 +26,7 @@ use std::{
     time::{Duration, Instant},
 };
 use strum::IntoEnumIterator;
+use tinybmp::Bmp;
 use tokio::{join, task::JoinHandle};
 
 /// The amount of time the user has to be within the radius of a station to be considered at the station.
@@ -429,6 +431,7 @@ pub(crate) struct TransitRender {
 
 impl TransitRender {
     const CONFIG_FILE: &'static str = "transit.yaml";
+    const SEPTA_IMAGE: &[u8] = include_bytes!("../assets/SEPTA.bmp");
 
     fn get_config_file() -> Result<File> {
         let home_dir = std::env::var("HOME").context("Can not load HOME environment variable")?;
@@ -545,6 +548,7 @@ impl TransitRender {
 
 impl Render for TransitRender {
     fn render(&self, canvas: &mut rpi_led_panel::Canvas) -> Result<()> {
+        trace!("Render called");
         let state_unlocked = self.state.lock();
 
         if let Some(state) = &state_unlocked.transit_state.state {
@@ -583,6 +587,12 @@ impl Render for TransitRender {
                 Point::new(0, 40),
                 MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
                 Alignment::Left,
+            )
+            .draw(canvas)?;
+
+            Image::new(
+                &Bmp::<Rgb888>::from_slice(Self::SEPTA_IMAGE).unwrap(),
+                Point::new(40, 20),
             )
             .draw(canvas)?;
         } else {

@@ -7,8 +7,6 @@ extern crate lazy_static;
 use crate::transit::TransitRender;
 use anyhow::{anyhow, Result};
 use led_driver::LedDriver;
-use log::Metadata;
-use log::Record;
 
 #[cfg(not(feature = "http_server"))]
 use tokio::signal;
@@ -25,27 +23,9 @@ mod led_driver;
 mod render;
 mod transit;
 
-static MY_LOGGER: MyLogger = MyLogger;
-
-struct MyLogger;
-
-impl log::Log for MyLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-
-    fn log(&self, record: &Record) {
-        if self.enabled(record.metadata()) {
-            println!("{} - {}", record.level(), record.args());
-        }
-    }
-    fn flush(&self) {}
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    log::set_max_level(log::LevelFilter::Debug);
-    log::set_logger(&MY_LOGGER)?;
+    env_logger::init();
 
     let transit_render: Box<TransitRender> = Box::new(
         TransitRender::from_config()

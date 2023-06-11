@@ -1,6 +1,6 @@
 use crate::{config, render::Render};
 use anyhow::{anyhow, Context, Result};
-use log::{debug, trace, warn};
+use log::{debug, info, trace, warn};
 use rpi_led_panel::{Canvas, RGBMatrix};
 use std::{
     fs::File,
@@ -63,6 +63,7 @@ impl LedDriver {
 
         // Create the render thread
         let render_thread_handle = thread::spawn(move || -> Result<()> {
+            debug!("Started render thread");
             while alive_render.load(Ordering::SeqCst) {
                 match driver_to_render_receiver.recv() {
                     Ok(mut canvas) => {
@@ -80,6 +81,8 @@ impl LedDriver {
 
         // Create the driver thread
         let driver_thread_handle = thread::spawn(move || -> Result<()> {
+            debug!("Started LED Matrix driver thread");
+
             let mut matrix;
             let mut step: u64 = 0;
             let (event_sender, event_receiver) = match event_sender_receiver {
@@ -110,7 +113,7 @@ impl LedDriver {
                     match event_receiver.try_recv() {
                         Ok(rx_event) => match rx_event {
                             RxEvent::UpdateMatrixConfig(rx_config) => {
-                                debug!("Updating config: {:#?}", rx_config);
+                                info!("Updating config: {:#?}", rx_config);
 
                                 let rx_config_clone = rx_config.clone();
 

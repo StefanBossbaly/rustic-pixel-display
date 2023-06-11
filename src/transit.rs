@@ -5,9 +5,10 @@ use embedded_graphics::{
     mono_font::{self, MonoTextStyle},
     pixelcolor::Rgb888,
     prelude::{Point, RgbColor},
-    text::{Alignment, Text},
+    text::Text,
     Drawable,
 };
+use embedded_layout::{layout::linear::LinearLayout, prelude::horizontal, view_group::Views};
 use geoutils::{Distance, Location};
 use home_assistant_rest::get::StateEnum;
 use log::{debug, trace, warn};
@@ -554,20 +555,13 @@ impl Render for TransitRender {
         if let Some(state) = &state_unlocked.transit_state.state {
             canvas.fill(0, 0, 0);
 
-            // Render the name of the person
+            // Attempt to figure out the name of the person
             let name = match &state_unlocked.person_name {
                 Some(name) => name,
                 None => "Unknown",
             };
 
-            Text::with_alignment(
-                name,
-                Point::new(0, 15),
-                MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
-                Alignment::Left,
-            )
-            .draw(canvas)?;
-
+            // Attempt to figure out the transit state
             let status_text = match state {
                 State::NoStatus(_) => {
                     if let Some(state) = &state_unlocked.person_state {
@@ -582,13 +576,22 @@ impl Render for TransitRender {
                 State::OnTrain(tracker) => format!("On Train {}", tracker.train_id),
             };
 
-            Text::with_alignment(
-                status_text.as_str(),
-                Point::new(0, 40),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
-                Alignment::Left,
-            )
-            .draw(canvas)?;
+            LinearLayout::vertical(Views::new(&mut [
+                Text::new(
+                    name,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
+                ),
+                Text::new(
+                    status_text.as_str(),
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ),
+            ]))
+            .with_alignment(horizontal::Left)
+            .arrange()
+            .draw(canvas)
+            .unwrap();
 
             Image::new(
                 &Bmp::<Rgb888>::from_slice(Self::SEPTA_IMAGE).unwrap(),

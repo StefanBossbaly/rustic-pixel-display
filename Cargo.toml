@@ -13,15 +13,16 @@ license = "GPL"
 
 [features]
 default = ["http_server"]
-http_server = ["dep:rocket"]
+http_server = ["dep:rocket", "dep:rocket_dyn_templates"]
 
 [dependencies]
-rpi-led-panel = { git = "https://github.com/StefanBossbaly/rpi_led_panel.git", features = ["drawing", "embedded-graphics"]}
+rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", features = ["drawing", "embedded-graphics"]}
 tokio = { version = "1", features = ["full"] }
 embedded-graphics = "0.8.0"
 embedded-layout = "0.3.1"
 rocket = { version = "=0.5.0-rc.3", features = ["json"], optional = true }
-serde = { version = "1.0.163", features = ["derive"] }
+rocket_dyn_templates = {version = "=0.1.0-rc.3", features = ["tera"], optional = true }
+serde = { version = "1.0.164", features = ["derive"] }
 serde_yaml = "0.9.21"
 strum = { version = "0.24", features = ["derive"] }
 strum_macros = "0.24"
@@ -30,11 +31,7 @@ septa-api = "0.3.3"
 home-assistant-rest = "0.2.0"
 geoutils = "0.5.1"
 lazy_static = "1.4.0"
-log = "0.4.18"
+log = "0.4.19"
 parking_lot = "0.12.1"
 tinybmp = "0.5.0"
 env_logger = "0.10.0"
-
-[dependencies.rocket_dyn_templates]
-version = "=0.1.0-rc.3"
-features = ["tera"]

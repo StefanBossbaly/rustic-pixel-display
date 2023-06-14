@@ -17,7 +17,11 @@ use geoutils::{Distance, Location};
 use home_assistant_rest::get::StateEnum;
 use log::{debug, error, trace, warn};
 use parking_lot::Mutex;
-use septa_api::{responses::Train, types::RegionalRailStop};
+use septa_api::{
+    requests::ArrivalsRequest,
+    responses::{Arrivals, Train},
+    types::RegionalRailStop,
+};
 use std::{
     collections::HashMap,
     error::Error,
@@ -711,5 +715,110 @@ impl Drop for TransitRender {
         if let Some(task_handle) = self.update_task_handle.take() {
             task_handle.abort();
         }
+    }
+}
+
+#[derive(Debug, Default)]
+struct UpcomingTrainsState {
+    southbound: Vec<Arrivals>,
+    northbound: Vec<Arrivals>,
+}
+
+struct UpcomingTrains {
+    state: Arc<Mutex<UpcomingTrainsState>>,
+
+    /// The regional rail stop
+    station: RegionalRailStop,
+
+    /// Flag used to gracefully terminate the render and driver threads
+    alive: Arc<AtomicBool>,
+
+    /// Handle to the task used to update the SEPTA information
+    update_task_handle: Option<JoinHandle<Result<()>>>,
+}
+
+impl UpcomingTrains {
+    const SEPTA_IMAGE: &[u8] = include_bytes!("../assets/SEPTA_16.bmp");
+
+    fn new(station: RegionalRailStop) -> Self {
+        let septa_api = septa_api::Client::new();
+
+        let state = Arc::new(Mutex::new(UpcomingTrainsState::default()));
+        let alive = Arc::new(AtomicBool::new(true));
+
+        let task_alive = alive.clone();
+        let task_state = state.clone();
+        let task_station = station.clone();
+
+        let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
+            while task_alive.load(Ordering::SeqCst) {
+                match septa_api
+                    .arrivals(ArrivalsRequest {
+                        station: task_station.clone(),
+                        results: Some(3),
+                        direction: None,
+                    })
+                    .await
+                {
+                    Ok(response) => {
+                        let mut state_unlocked = task_state.lock();
+                        state_unlocked.northbound = response.northbound;
+                        state_unlocked.southbound = response.southbound;
+                    }
+                    Err(e) => error!("Could not get updated information {e}"),
+                }
+
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+
+            Ok(())
+        });
+
+        Self {
+            state,
+            station,
+            alive,
+            update_task_handle: Some(update_task_handle),
+        }
+    }
+}
+
+impl Render for UpcomingTrains {
+    fn render(&self, canvas: &mut rpi_led_panel::Canvas) -> Result<()> {
+        let station_name = self.station.to_string();
+        let state_unlocked = self.state.lock();
+
+        let mut train_widgets = Vec::new();
+
+        for train in state_unlocked.northbound.iter() {
+            train_widgets.push(Text::new(
+                &train.train_id,
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_10X20, Rgb888::WHITE),
+            ));
+        }
+
+        LinearLayout::vertical(
+            Chain::new(
+                LinearLayout::horizontal(
+                    Chain::new(Text::new(
+                        &station_name,
+                        Point::zero(),
+                        MonoTextStyle::new(&mono_font::ascii::FONT_10X20, Rgb888::WHITE),
+                    ))
+                    .append(Image::new(
+                        &Bmp::<Rgb888>::from_slice(Self::SEPTA_IMAGE).unwrap(),
+                        Point::zero(),
+                    )),
+                )
+                .arrange(),
+            )
+            .append(Views::new(train_widgets.as_mut_slice())),
+        )
+        .arrange()
+        .draw(canvas)
+        .unwrap();
+
+        Ok(())
     }
 }

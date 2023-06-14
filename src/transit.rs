@@ -28,15 +28,13 @@ use std::{
     fs::File,
     io::BufReader,
     path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 use strum::IntoEnumIterator;
 use tinybmp::Bmp;
-use tokio::{join, task::JoinHandle};
+use tokio::{join, select, task::JoinHandle};
+use tokio_util::sync::CancellationToken;
 
 /// The amount of time the user has to be within the radius of a station to be considered at the station.
 const NO_STATUS_TO_AT_STATION: Duration = Duration::from_secs(30);
@@ -444,8 +442,7 @@ enum SupplementalTransitInfo {
 pub(crate) struct TransitRender {
     state: Arc<Mutex<StateHolder>>,
 
-    /// Flag used to gracefully terminate the render and driver threads
-    alive: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 
     /// Handle to the task used to update the SEPTA and User location
     update_task_handle: Option<JoinHandle<Result<()>>>,
@@ -527,15 +524,15 @@ impl TransitRender {
 
         let state_holder = Arc::new(Mutex::new(StateHolder::new()));
         let supplement_transit_info = Arc::new(Mutex::new(None));
-        let alive = Arc::new(AtomicBool::new(true));
+        let cancel_token = CancellationToken::new();
 
         // Clone the shared data since it will be moved onto the task
         let task_state_holder = state_holder.clone();
         let task_supplement_transit_info = supplement_transit_info.clone();
-        let task_alive: Arc<AtomicBool> = alive.clone();
+        let task_cancel_token = cancel_token.clone();
 
         let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
-            while task_alive.load(Ordering::SeqCst) {
+            loop {
                 let trains_request = septa_client.train_view();
                 let user_location_request = Self::get_location(&home_assistant_client, &config);
 
@@ -593,7 +590,10 @@ impl TransitRender {
                     None => error!("Simple state was not updated!"),
                 }
 
-                tokio::time::sleep(Duration::from_secs(15)).await;
+                select! {
+                    _ = tokio::time::sleep(Duration::from_secs(15)) => {},
+                    _ = task_cancel_token.cancelled() => break,
+                }
             }
 
             Ok(())
@@ -601,7 +601,7 @@ impl TransitRender {
 
         Ok(Self {
             state: state_holder,
-            alive,
+            cancel_token,
             update_task_handle: Some(update_task_handle),
             supplement_transit_info,
         })
@@ -710,7 +710,7 @@ impl Render for TransitRender {
 
 impl Drop for TransitRender {
     fn drop(&mut self) {
-        self.alive.store(false, Ordering::SeqCst);
+        self.cancel_token.cancel();
 
         if let Some(task_handle) = self.update_task_handle.take() {
             task_handle.abort();
@@ -731,7 +731,7 @@ struct UpcomingTrains {
     station: RegionalRailStop,
 
     /// Flag used to gracefully terminate the render and driver threads
-    alive: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 
     /// Handle to the task used to update the SEPTA information
     update_task_handle: Option<JoinHandle<Result<()>>>,
@@ -744,14 +744,14 @@ impl UpcomingTrains {
         let septa_api = septa_api::Client::new();
 
         let state = Arc::new(Mutex::new(UpcomingTrainsState::default()));
-        let alive = Arc::new(AtomicBool::new(true));
+        let cancel_token = CancellationToken::new();
 
-        let task_alive = alive.clone();
+        let task_cancel_token = cancel_token.clone();
         let task_state = state.clone();
         let task_station = station.clone();
 
         let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
-            while task_alive.load(Ordering::SeqCst) {
+            loop {
                 match septa_api
                     .arrivals(ArrivalsRequest {
                         station: task_station.clone(),
@@ -768,7 +768,10 @@ impl UpcomingTrains {
                     Err(e) => error!("Could not get updated information {e}"),
                 }
 
-                tokio::time::sleep(Duration::from_secs(60)).await;
+                select! {
+                    _ = tokio::time::sleep(Duration::from_secs(60)) => {},
+                    _ = task_cancel_token.cancelled() => break,
+                }
             }
 
             Ok(())
@@ -777,7 +780,7 @@ impl UpcomingTrains {
         Self {
             state,
             station,
-            alive,
+            cancel_token,
             update_task_handle: Some(update_task_handle),
         }
     }
@@ -820,5 +823,15 @@ impl Render for UpcomingTrains {
         .unwrap();
 
         Ok(())
+    }
+}
+
+impl Drop for UpcomingTrains {
+    fn drop(&mut self) {
+        self.cancel_token.cancel();
+
+        if let Some(task_handle) = self.update_task_handle.take() {
+            task_handle.abort();
+        }
     }
 }

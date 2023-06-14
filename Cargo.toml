@@ -18,6 +18,7 @@ http_server = ["dep:rocket", "dep:rocket_dyn_templates"]
 [dependencies]
 rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", features = ["drawing", "embedded-graphics"]}
 tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7.8"
 embedded-graphics = "0.8.0"
 embedded-layout = "0.3.1"
 rocket = { version = "=0.5.0-rc.3", features = ["json"], optional = true }

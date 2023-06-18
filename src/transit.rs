@@ -9,7 +9,7 @@ use embedded_graphics::{
     Drawable,
 };
 use embedded_layout::{
-    layout::linear::LinearLayout,
+    layout::linear::{spacing, LinearLayout},
     prelude::{horizontal, Chain},
     view_group::Views,
 };
@@ -453,7 +453,7 @@ pub(crate) struct TransitRender {
 
 impl TransitRender {
     const CONFIG_FILE: &'static str = "transit.yaml";
-    const SEPTA_IMAGE: &[u8] = include_bytes!("../assets/SEPTA.bmp");
+    const SEPTA_IMAGE_BIG: &[u8] = include_bytes!("../assets/SEPTA.bmp");
 
     fn get_config_file() -> Result<File> {
         let home_dir = std::env::var("HOME").context("Can not load HOME environment variable")?;
@@ -699,7 +699,7 @@ impl Render for TransitRender {
         .unwrap();
 
         Image::new(
-            &Bmp::<Rgb888>::from_slice(Self::SEPTA_IMAGE).unwrap(),
+            &Bmp::<Rgb888>::from_slice(Self::SEPTA_IMAGE_BIG).unwrap(),
             Point::new(40, 20),
         )
         .draw(canvas)?;
@@ -724,7 +724,7 @@ struct UpcomingTrainsState {
     northbound: Vec<Arrivals>,
 }
 
-struct UpcomingTrains {
+pub(crate) struct UpcomingTrainsRender {
     state: Arc<Mutex<UpcomingTrainsState>>,
 
     /// The regional rail stop
@@ -737,10 +737,13 @@ struct UpcomingTrains {
     update_task_handle: Option<JoinHandle<Result<()>>>,
 }
 
-impl UpcomingTrains {
-    const SEPTA_IMAGE: &[u8] = include_bytes!("../assets/SEPTA_16.bmp");
+const SEPTA_IMAGE: &[u8] = include_bytes!("../assets/SEPTA_16.bmp");
+lazy_static! {
+    static ref SEPTA_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(SEPTA_IMAGE).unwrap();
+}
 
-    fn new(station: RegionalRailStop) -> Self {
+impl UpcomingTrainsRender {
+    pub(crate) fn new(station: RegionalRailStop) -> Self {
         let septa_api = septa_api::Client::new();
 
         let state = Arc::new(Mutex::new(UpcomingTrainsState::default()));
@@ -764,6 +767,11 @@ impl UpcomingTrains {
                         let mut state_unlocked = task_state.lock();
                         state_unlocked.northbound = response.northbound;
                         state_unlocked.southbound = response.southbound;
+
+                        println!(
+                            "northbound: {:?}, southbound: {:?}",
+                            state_unlocked.northbound, state_unlocked.southbound
+                        );
                     }
                     Err(e) => error!("Could not get updated information {e}"),
                 }
@@ -786,47 +794,65 @@ impl UpcomingTrains {
     }
 }
 
-impl Render for UpcomingTrains {
+impl Render for UpcomingTrainsRender {
     fn render(&self, canvas: &mut rpi_led_panel::Canvas) -> Result<()> {
         let station_name = self.station.to_string();
         let state_unlocked = self.state.lock();
 
-        let mut train_widgets = Vec::new();
-
+        // Have to build a dynamic view
+        let mut arrival_layouts = Vec::new();
         for train in state_unlocked.northbound.iter() {
-            train_widgets.push(Text::new(
+            let text_color = match train.status.as_str() {
+                "On Time" => Rgb888::GREEN,
+                _ => Rgb888::RED,
+            };
+
+            let view_chain = Chain::new(Text::new(
                 &train.train_id,
                 Point::zero(),
                 MonoTextStyle::new(&mono_font::ascii::FONT_10X20, Rgb888::WHITE),
+            ))
+            .append(Text::new(
+                train.status.as_str(),
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
             ));
+
+            arrival_layouts.push(LinearLayout::horizontal(view_chain).arrange());
         }
 
-        LinearLayout::vertical(
-            Chain::new(
-                LinearLayout::horizontal(
-                    Chain::new(Text::new(
-                        &station_name,
-                        Point::zero(),
-                        MonoTextStyle::new(&mono_font::ascii::FONT_10X20, Rgb888::WHITE),
-                    ))
-                    .append(Image::new(
-                        &Bmp::<Rgb888>::from_slice(Self::SEPTA_IMAGE).unwrap(),
-                        Point::zero(),
-                    )),
-                )
-                .arrange(),
+        let chain = Chain::new(
+            LinearLayout::horizontal(
+                Chain::new(Text::new(
+                    &station_name,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
+                ))
+                .append(Image::new(&*SEPTA_BMP, Point::zero())),
             )
-            .append(Views::new(train_widgets.as_mut_slice())),
-        )
-        .arrange()
-        .draw(canvas)
-        .unwrap();
+            .with_spacing(spacing::FixedMargin(6))
+            .arrange(),
+        );
+
+        if !arrival_layouts.is_empty() {
+            let chain = chain.append(Views::new(arrival_layouts.as_mut_slice()));
+
+            LinearLayout::vertical(chain)
+                .arrange()
+                .draw(canvas)
+                .unwrap();
+        } else {
+            LinearLayout::vertical(chain)
+                .arrange()
+                .draw(canvas)
+                .unwrap();
+        }
 
         Ok(())
     }
 }
 
-impl Drop for UpcomingTrains {
+impl Drop for UpcomingTrainsRender {
     fn drop(&mut self) {
         self.cancel_token.cancel();
 

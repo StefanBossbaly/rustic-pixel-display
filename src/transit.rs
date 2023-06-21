@@ -10,7 +10,7 @@ use embedded_graphics::{
 };
 use embedded_layout::{
     layout::linear::{spacing, LinearLayout},
-    prelude::{horizontal, Chain},
+    prelude::{horizontal, vertical, Chain},
     view_group::Views,
 };
 use geoutils::{Distance, Location};
@@ -796,21 +796,29 @@ impl UpcomingTrainsRender {
 
 impl Render for UpcomingTrainsRender {
     fn render(&self, canvas: &mut rpi_led_panel::Canvas) -> Result<()> {
+        canvas.fill(0, 0, 0);
+
         let station_name = self.station.to_string();
         let state_unlocked = self.state.lock();
+        let ntime;
+        let stime;
 
-        // Have to build a dynamic view
-        let mut arrival_layouts = Vec::new();
-        for train in state_unlocked.northbound.iter() {
+        let northbound_train_layout = if let Some(train) = state_unlocked.northbound.get(0) {
             let text_color = match train.status.as_str() {
                 "On Time" => Rgb888::GREEN,
                 _ => Rgb888::RED,
             };
+            ntime = train.sched_time.format("%_H:%M").to_string();
 
-            let view_chain = Chain::new(Text::new(
+            let chain = Chain::new(Text::new(
                 &train.train_id,
                 Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_10X20, Rgb888::WHITE),
+                MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
+            ))
+            .append(Text::new(
+                &ntime,
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
             ))
             .append(Text::new(
                 train.status.as_str(),
@@ -818,35 +826,112 @@ impl Render for UpcomingTrainsRender {
                 MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
             ));
 
-            arrival_layouts.push(LinearLayout::horizontal(view_chain).arrange());
-        }
-
-        let chain = Chain::new(
-            LinearLayout::horizontal(
-                Chain::new(Text::new(
-                    &station_name,
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
-                ))
-                .append(Image::new(&*SEPTA_BMP, Point::zero())),
-            )
-            .with_spacing(spacing::FixedMargin(6))
-            .arrange(),
-        );
-
-        if !arrival_layouts.is_empty() {
-            let chain = chain.append(Views::new(arrival_layouts.as_mut_slice()));
-
-            LinearLayout::vertical(chain)
+            LinearLayout::horizontal(chain)
+                .with_alignment(vertical::Center)
+                .with_spacing(spacing::FixedMargin(6))
                 .arrange()
-                .draw(canvas)
-                .unwrap();
         } else {
-            LinearLayout::vertical(chain)
+            let chain = Chain::new(Text::new(
+                "No Train",
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
+            ))
+            .append(Text::new(
+                "No Status",
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+            ))
+            .append(Text::new(
+                "No Status",
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+            ));
+
+            LinearLayout::horizontal(chain)
+                .with_alignment(vertical::Center)
+                .with_spacing(spacing::FixedMargin(6))
                 .arrange()
-                .draw(canvas)
-                .unwrap();
-        }
+        };
+
+        let southbound_train_layout = if let Some(train) = state_unlocked.southbound.get(0) {
+            let text_color = match train.status.as_str() {
+                "On Time" => Rgb888::GREEN,
+                _ => Rgb888::RED,
+            };
+            stime = train.sched_time.format("%_H:%M").to_string();
+
+            let chain = Chain::new(Text::new(
+                &train.train_id,
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
+            ))
+            .append(Text::new(
+                &stime,
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
+            ))
+            .append(Text::new(
+                train.status.as_str(),
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
+            ));
+
+            LinearLayout::horizontal(chain)
+                .with_alignment(vertical::Center)
+                .with_spacing(spacing::FixedMargin(6))
+                .arrange()
+        } else {
+            let chain = Chain::new(Text::new(
+                "No Train",
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
+            ))
+            .append(Text::new(
+                "No Status",
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+            ))
+            .append(Text::new(
+                "No Status",
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+            ));
+
+            LinearLayout::horizontal(chain)
+                .with_alignment(vertical::Center)
+                .with_spacing(spacing::FixedMargin(6))
+                .arrange()
+        };
+
+        LinearLayout::vertical(
+            Chain::new(
+                LinearLayout::horizontal(
+                    Chain::new(Text::new(
+                        &station_name,
+                        Point::zero(),
+                        MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
+                    ))
+                    .append(Image::new(&*SEPTA_BMP, Point::zero())),
+                )
+                .with_spacing(spacing::FixedMargin(6))
+                .arrange(),
+            )
+            .append(Text::new(
+                "Northbound",
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_7X13_BOLD, Rgb888::WHITE),
+            ))
+            .append(northbound_train_layout)
+            .append(Text::new(
+                "Southbound",
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_7X13_BOLD, Rgb888::WHITE),
+            ))
+            .append(southbound_train_layout),
+        )
+        .arrange()
+        .draw(canvas)
+        .unwrap();
 
         Ok(())
     }

@@ -4,12 +4,12 @@
 #[macro_use]
 extern crate lazy_static;
 
-use crate::transit::TransitRender;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use led_driver::LedDriver;
 
 #[cfg(not(feature = "http_server"))]
 use tokio::signal;
+use transit::UpcomingTrainsRender;
 
 #[cfg(feature = "http_server")]
 mod http_server;
@@ -19,6 +19,7 @@ mod http_server;
 extern crate rocket;
 
 mod config;
+mod dynamic_view_group;
 mod led_driver;
 mod render;
 mod transit;
@@ -27,10 +28,9 @@ mod transit;
 async fn main() -> Result<()> {
     env_logger::init();
 
-    let transit_render: Box<TransitRender> = Box::new(
-        TransitRender::from_config()
-            .map_err(|e| anyhow!("Failed to create transit tracker: {e}"))?,
-    );
+    let transit_render = Box::new(UpcomingTrainsRender::new(
+        septa_api::types::RegionalRailStop::Downingtown,
+    ));
 
     #[cfg(feature = "http_server")]
     {

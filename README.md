@@ -5,6 +5,10 @@ RGB LED matrices that displays things like real time location, transit, stocks a
 relevant information. The eventual goal is to have a plugin system that will allow other developers
 to write their own plugins. Currently the project has an embedded HTTP server that allows for configuration.
 
+## Example Photos
+
+![Train Arrivals](https://media.githubusercontent.com/media/StefanBossbaly/rustic-pixel-display/master/assets/train_arrivals.jpg)
+
 ## Authors
 
 Stefan Bossbaly

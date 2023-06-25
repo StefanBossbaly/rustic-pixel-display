@@ -1,6 +1,7 @@
 use anyhow::Result;
-use rpi_led_panel::Canvas;
+use embedded_graphics::{pixelcolor::Rgb888, prelude::DrawTarget};
+use std::convert::Infallible;
 
-pub(crate) trait Render {
-    fn render(&self, canvas: &mut Canvas) -> Result<()>;
+pub(crate) trait Render<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
+    fn render(&self, canvas: &mut D) -> Result<()>;
 }

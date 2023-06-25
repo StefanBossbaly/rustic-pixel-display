@@ -19,7 +19,6 @@ mod http_server;
 extern crate rocket;
 
 mod config;
-mod dynamic_view_group;
 mod led_driver;
 mod render;
 mod transit;

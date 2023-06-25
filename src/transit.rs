@@ -4,7 +4,7 @@ use embedded_graphics::{
     image::Image,
     mono_font::{self, MonoTextStyle},
     pixelcolor::Rgb888,
-    prelude::{Point, RgbColor},
+    prelude::{DrawTarget, Point, RgbColor},
     text::Text,
     Drawable,
 };
@@ -24,6 +24,7 @@ use septa_api::{
 };
 use std::{
     collections::HashMap,
+    convert::Infallible,
     error::Error,
     fs::File,
     io::BufReader,
@@ -612,12 +613,10 @@ impl TransitRender {
     }
 }
 
-impl Render for TransitRender {
-    fn render(&self, canvas: &mut rpi_led_panel::Canvas) -> Result<()> {
+impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitRender {
+    fn render(&self, canvas: &mut D) -> Result<()> {
         trace!("Render called");
         let state_unlocked = self.state.lock();
-
-        canvas.fill(0, 0, 0);
 
         // Attempt to figure out the name of the person
         let name = match &state_unlocked.person_name {
@@ -794,10 +793,8 @@ impl UpcomingTrainsRender {
     }
 }
 
-impl Render for UpcomingTrainsRender {
-    fn render(&self, canvas: &mut rpi_led_panel::Canvas) -> Result<()> {
-        canvas.fill(0, 0, 0);
-
+impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTrainsRender {
+    fn render(&self, canvas: &mut D) -> Result<()> {
         let station_name = self.station.to_string();
         let state_unlocked = self.state.lock();
         let ntime;

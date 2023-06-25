@@ -39,7 +39,7 @@ impl LedDriver {
     const CONFIG_FILE: &'static str = "led-statusboard.yaml";
 
     pub(crate) fn new(
-        render: Box<dyn Render + Send + Sync>,
+        render: Box<dyn Render<rpi_led_panel::Canvas> + Send + Sync>,
         event_sender_receiver: Option<(
             std::sync::mpsc::Sender<TxEvent>,
             std::sync::mpsc::Receiver<RxEvent>,
@@ -67,6 +67,7 @@ impl LedDriver {
             while alive_render.load(Ordering::SeqCst) {
                 match driver_to_render_receiver.recv() {
                     Ok(mut canvas) => {
+                        canvas.fill(0, 0, 0);
                         render.render(canvas.as_mut())?;
                         render_to_driver_sender.send(canvas)?;
                     }

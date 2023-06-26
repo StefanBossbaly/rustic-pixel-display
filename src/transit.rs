@@ -534,65 +534,80 @@ impl TransitRender {
 
         let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
             loop {
+                let refresh_time = tokio::time::Instant::now() + Duration::from_secs(15);
+
                 let trains_request = septa_client.train_view();
                 let user_location_request = Self::get_location(&home_assistant_client, &config);
 
                 let (trains_result, user_location_result) =
                     join!(trains_request, user_location_request);
 
-                let (person_name, person_state, user_loc_lat, user_loc_lon) = user_location_result?;
-                let trains = trains_result?;
+                match (user_location_result, trains_result) {
+                    (Ok((person_name, person_state, user_loc_lat, user_loc_lon)), Ok(trains)) => {
+                        let mut simple_state: Option<SimpleTransitState>;
 
-                let mut simple_state: Option<SimpleTransitState>;
+                        {
+                            let mut holder_unlocked = task_state_holder.lock();
 
-                {
-                    let mut holder_unlocked = task_state_holder.lock();
+                            let transit_state = std::mem::take(&mut holder_unlocked.transit_state);
+                            let new_state =
+                                transit_state.update_state((user_loc_lat, user_loc_lon), trains)?;
 
-                    let transit_state = std::mem::take(&mut holder_unlocked.transit_state);
-                    let new_state =
-                        transit_state.update_state((user_loc_lat, user_loc_lon), trains)?;
+                            simple_state = Some((&holder_unlocked.transit_state).into());
 
-                    simple_state = Some((&holder_unlocked.transit_state).into());
+                            let _ =
+                                std::mem::replace(&mut holder_unlocked.transit_state, new_state);
+                            holder_unlocked.person_name = person_name;
+                            holder_unlocked.person_state = person_state;
+                        } // drop(holder_unlocked)
 
-                    let _ = std::mem::replace(&mut holder_unlocked.transit_state, new_state);
-                    holder_unlocked.person_name = person_name;
-                    holder_unlocked.person_state = person_state;
-                } // drop(holder_unlocked)
-
-                // Provide supplemental information
-                match simple_state.take() {
-                    Some(state) => match state {
-                        SimpleTransitState::NoStatus => {
-                            *task_supplement_transit_info.lock() = None;
-                        }
-                        SimpleTransitState::AtStation(stop) => {
-                            match septa_client
-                                .arrivals(septa_api::requests::ArrivalsRequest {
-                                    station: stop,
-                                    results: Some(1),
-                                    direction: None,
-                                })
-                                .await
-                            {
-                                Ok(arrivals) => {
-                                    *task_supplement_transit_info.lock() =
-                                        Some(SupplementalTransitInfo::AtStation(
-                                            arrivals.northbound.get(0).cloned(),
-                                            arrivals.southbound.get(0).cloned(),
-                                        ));
+                        // Provide supplemental information
+                        match simple_state.take() {
+                            Some(state) => match state {
+                                SimpleTransitState::NoStatus => {
+                                    *task_supplement_transit_info.lock() = None;
                                 }
-                                Err(e) => error!("Error occurred while getting arrival data: {e}"),
-                            }
+                                SimpleTransitState::AtStation(stop) => {
+                                    match septa_client
+                                        .arrivals(septa_api::requests::ArrivalsRequest {
+                                            station: stop,
+                                            results: Some(1),
+                                            direction: None,
+                                        })
+                                        .await
+                                    {
+                                        Ok(arrivals) => {
+                                            *task_supplement_transit_info.lock() =
+                                                Some(SupplementalTransitInfo::AtStation(
+                                                    arrivals.northbound.get(0).cloned(),
+                                                    arrivals.southbound.get(0).cloned(),
+                                                ));
+                                        }
+                                        Err(e) => {
+                                            error!("Error occurred while getting arrival data: {e}")
+                                        }
+                                    }
+                                }
+                                SimpleTransitState::OnTrain(_) => {
+                                    *task_supplement_transit_info.lock() = None;
+                                }
+                            },
+                            None => error!("Simple state was not updated!"),
                         }
-                        SimpleTransitState::OnTrain(_) => {
-                            *task_supplement_transit_info.lock() = None;
-                        }
-                    },
-                    None => error!("Simple state was not updated!"),
+                    }
+                    (Err(location_error), Err(train_error)) => {
+                        error!("Error in both location and SEPTA calls (location_error: {location_error}, train_error: {train_error})");
+                    }
+                    (Ok(_), Err(train_error)) => {
+                        error!("Error in SEPTA call ({train_error})");
+                    }
+                    (Err(location_error), Ok(_)) => {
+                        error!("Error in location call ({location_error})");
+                    }
                 }
 
                 select! {
-                    _ = tokio::time::sleep(Duration::from_secs(15)) => {},
+                    _ = tokio::time::sleep_until(refresh_time) => {},
                     _ = task_cancel_token.cancelled() => break,
                 }
             }
@@ -754,6 +769,8 @@ impl UpcomingTrainsRender {
 
         let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
             loop {
+                let refresh_time = tokio::time::Instant::now() + Duration::from_secs(60);
+
                 match septa_api
                     .arrivals(ArrivalsRequest {
                         station: task_station.clone(),
@@ -776,7 +793,7 @@ impl UpcomingTrainsRender {
                 }
 
                 select! {
-                    _ = tokio::time::sleep(Duration::from_secs(60)) => {},
+                    _ = tokio::time::sleep_until(refresh_time) => {},
                     _ = task_cancel_token.cancelled() => break,
                 }
             }

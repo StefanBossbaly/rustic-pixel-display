@@ -7,6 +7,7 @@
     "settings": {
         "rust-analyzer.check.command": "clippy",
         "editor.formatOnSave": true,
+        "rust-analyzer.cargo.features": ["", "http_server", "simulator"]
     },
     "launch": {
         "configurations": [

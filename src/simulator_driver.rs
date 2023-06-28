@@ -33,12 +33,12 @@ impl SimulatorDriver {
             let output_settings = OutputSettingsBuilder::new().scale(8).max_fps(120).build();
             let mut window = Window::new("Simulator", &output_settings);
 
-            let mut canvas = SimulatorDisplay::<Rgb888>::new(Size::new(128, 64));
+            let mut canvas = SimulatorDisplay::<Rgb888>::new(Size::new(256, 128));
 
             while alive_driver.load(Ordering::SeqCst) {
                 canvas
                     .fill_solid(
-                        &Rectangle::new(Point::zero(), Size::new(128, 64)),
+                        &Rectangle::new(Point::zero(), Size::new(256, 128)),
                         Rgb888::BLACK,
                     )
                     .unwrap();

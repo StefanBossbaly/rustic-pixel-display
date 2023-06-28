@@ -4,15 +4,19 @@ use embedded_graphics::{
     image::Image,
     mono_font::{self, MonoTextStyle},
     pixelcolor::Rgb888,
-    prelude::{DrawTarget, Point, RgbColor},
+    prelude::{DrawTarget, PixelColor, Point, RgbColor},
+    primitives::Rectangle,
     text::Text,
     Drawable,
 };
 use embedded_layout::{
-    layout::linear::{spacing, LinearLayout},
+    chain,
+    layout::linear::{Horizontal, LinearLayout},
     prelude::{horizontal, vertical, Chain},
     view_group::Views,
+    View,
 };
+use embedded_layout::{layout::linear::spacing, prelude::Link};
 use geoutils::{Distance, Location};
 use home_assistant_rest::get::StateEnum;
 use log::{debug, error, trace, warn};
@@ -810,122 +814,137 @@ impl UpcomingTrainsRender {
     }
 }
 
+type UpcomingArrivalViews<'a, C> = chain! {
+    Text<'a, MonoTextStyle<'static, C>>,
+    Text<'a, MonoTextStyle<'static, C>>,
+    Text<'a, MonoTextStyle<'static, C>>,
+    Text<'a, MonoTextStyle<'static, C>>
+};
+
+enum LayoutView<'a, C: PixelColor> {
+    UpcomingArrival(
+        LinearLayout<
+            Horizontal<vertical::Center, spacing::FixedMargin>,
+            UpcomingArrivalViews<'a, C>,
+        >,
+    ),
+    NoArrival(
+        LinearLayout<
+            Horizontal<vertical::Center, spacing::FixedMargin>,
+            chain! { Text<'a, MonoTextStyle<'static, C>> },
+        >,
+    ),
+}
+
+impl<C: PixelColor> View for LayoutView<'_, C> {
+    #[inline]
+    fn translate_impl(&mut self, by: Point) {
+        match self {
+            LayoutView::UpcomingArrival(layout) => View::translate_impl(layout, by),
+            LayoutView::NoArrival(layout) => View::translate_impl(layout, by),
+        }
+    }
+
+    #[inline]
+    fn bounds(&self) -> Rectangle {
+        match self {
+            LayoutView::UpcomingArrival(layout) => View::bounds(layout),
+            LayoutView::NoArrival(layout) => View::bounds(layout),
+        }
+    }
+}
+
+impl<C> Drawable for LayoutView<'_, C>
+where
+    C: PixelColor,
+{
+    type Color = C;
+    type Output = ();
+
+    fn draw<D>(&self, target: &mut D) -> std::result::Result<Self::Output, D::Error>
+    where
+        D: DrawTarget<Color = Self::Color>,
+    {
+        match self {
+            LayoutView::UpcomingArrival(text) => text.draw(target)?,
+            LayoutView::NoArrival(text) => text.draw(target)?,
+        }
+
+        Ok(())
+    }
+}
+
 impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTrainsRender {
     fn render(&self, canvas: &mut D) -> Result<()> {
         let station_name = self.station.to_string();
         let state_unlocked = self.state.lock();
-        let ntime;
-        let stime;
 
-        let northbound_train_layout = if let Some(train) = state_unlocked.northbound.get(0) {
-            let text_color = match train.status.as_str() {
-                "On Time" => Rgb888::GREEN,
-                _ => Rgb888::RED,
-            };
-            ntime = train.sched_time.format("%_H:%M").to_string();
+        let mut northbound_layouts = Vec::new();
+        let mut format_strings = Vec::new();
 
-            let chain = Chain::new(Text::new(
-                &train.train_id,
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
-            ))
-            .append(Text::new(
-                &ntime,
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
-            ))
-            .append(Text::new(
-                train.status.as_str(),
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
-            ));
-
-            LinearLayout::horizontal(chain)
+        if state_unlocked.northbound.is_empty() {
+            northbound_layouts.push(LayoutView::NoArrival(
+                LinearLayout::horizontal(Chain::new(Text::new(
+                    "No Status",
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
+                )))
                 .with_alignment(vertical::Center)
                 .with_spacing(spacing::FixedMargin(6))
-                .arrange()
+                .arrange(),
+            ));
         } else {
-            let chain = Chain::new(Text::new(
-                "No Train",
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
-            ))
-            .append(Text::new(
-                "No Status",
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
-            ))
-            .append(Text::new(
-                "No Status",
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
-            ));
+            for train in state_unlocked.northbound.iter() {
+                format_strings.push((
+                    train.sched_time.format("%_H:%M").to_string(),
+                    train.destination.to_string(),
+                ));
+            }
 
-            LinearLayout::horizontal(chain)
-                .with_alignment(vertical::Center)
-                .with_spacing(spacing::FixedMargin(6))
-                .arrange()
-        };
+            for (index, train) in state_unlocked.northbound.iter().enumerate() {
+                let text_color = match train.status.as_str() {
+                    "On Time" => Rgb888::GREEN,
+                    _ => Rgb888::RED,
+                };
 
-        let southbound_train_layout = if let Some(train) = state_unlocked.southbound.get(0) {
-            let text_color = match train.status.as_str() {
-                "On Time" => Rgb888::GREEN,
-                _ => Rgb888::RED,
-            };
-            stime = train.sched_time.format("%_H:%M").to_string();
+                let chain = Chain::new(Text::new(
+                    &format_strings[index].0,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ))
+                .append(Text::new(
+                    &format_strings[index].1,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ))
+                .append(Text::new(
+                    &train.train_id,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ))
+                .append(Text::new(
+                    train.status.as_str(),
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
+                ));
 
-            let chain = Chain::new(Text::new(
-                &train.train_id,
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
-            ))
-            .append(Text::new(
-                &stime,
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
-            ))
-            .append(Text::new(
-                train.status.as_str(),
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
-            ));
-
-            LinearLayout::horizontal(chain)
-                .with_alignment(vertical::Center)
-                .with_spacing(spacing::FixedMargin(6))
-                .arrange()
-        } else {
-            let chain = Chain::new(Text::new(
-                "No Train",
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
-            ))
-            .append(Text::new(
-                "No Status",
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
-            ))
-            .append(Text::new(
-                "No Status",
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
-            ));
-
-            LinearLayout::horizontal(chain)
-                .with_alignment(vertical::Center)
-                .with_spacing(spacing::FixedMargin(6))
-                .arrange()
-        };
+                northbound_layouts.push(LayoutView::UpcomingArrival(
+                    LinearLayout::horizontal(chain)
+                        .with_alignment(vertical::Center)
+                        .with_spacing(spacing::FixedMargin(6))
+                        .arrange(),
+                ));
+            }
+        }
 
         LinearLayout::vertical(
             Chain::new(
                 LinearLayout::horizontal(
-                    Chain::new(Text::new(
+                    Chain::new(Image::new(&*SEPTA_BMP, Point::zero())).append(Text::new(
                         &station_name,
                         Point::zero(),
                         MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
-                    ))
-                    .append(Image::new(&*SEPTA_BMP, Point::zero())),
+                    )),
                 )
                 .with_spacing(spacing::FixedMargin(6))
                 .arrange(),
@@ -935,13 +954,7 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTr
                 Point::zero(),
                 MonoTextStyle::new(&mono_font::ascii::FONT_7X13_BOLD, Rgb888::WHITE),
             ))
-            .append(northbound_train_layout)
-            .append(Text::new(
-                "Southbound",
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_7X13_BOLD, Rgb888::WHITE),
-            ))
-            .append(southbound_train_layout),
+            .append(Views::new(northbound_layouts.as_mut_slice())),
         )
         .arrange()
         .draw(canvas)

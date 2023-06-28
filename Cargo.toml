@@ -17,7 +17,7 @@ http_server = ["dep:rocket", "dep:rocket_dyn_templates"]
 simulator = ["dep:embedded-graphics-simulator"]
 
 [dependencies]
-rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", features = ["drawing", "embedded-graphics"]}
+rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", features = ["drawing", "embedded-graphics"] }
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7.8"
 embedded-graphics = "0.8.0"
@@ -26,9 +26,9 @@ embedded-layout = "0.3.1"
 rocket = { version = "=0.5.0-rc.3", features = ["json"], optional = true }
 rocket_dyn_templates = {version = "=0.1.0-rc.3", features = ["tera"], optional = true }
 serde = { version = "1.0.164", features = ["derive"] }
-serde_yaml = "0.9.21"
-strum = { version = "0.24", features = ["derive"] }
-strum_macros = "0.24"
+serde_yaml = "0.9.22"
+strum = { version = "0.25", features = ["derive"] }
+strum_macros = "0.25"
 anyhow = "1.0.71"
 septa-api = { git = "https://github.com/StefanBossbaly/septa-api", branch = "master" }
 home-assistant-rest = "0.2.0"

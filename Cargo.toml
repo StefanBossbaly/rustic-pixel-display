@@ -22,7 +22,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7.8"
 embedded-graphics = "0.8.0"
 embedded-graphics-simulator = { version = "0.5.0", optional = true }
-embedded-layout-macros = { git = "https://github.com/StefanBossbaly/embedded-layout.git", branch = "feature-fix-missing-clone" }
+embedded-layout-macros = { git = "https://github.com/bugadani/embedded-layout.git", branch = "master" }
 embedded-layout = { git = "https://github.com/bugadani/embedded-layout.git", branch = "master" }
 rocket = { version = "=0.5.0-rc.3", features = ["json"], optional = true }
 rocket_dyn_templates = {version = "=0.1.0-rc.3", features = ["tera"], optional = true }

@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context, Result};
 use embedded_graphics::{
     image::Image,
     mono_font::{self, MonoTextStyle},
-    pixelcolor::{Rgb555, Rgb565, Rgb888},
+    pixelcolor::Rgb888,
     prelude::{DrawTarget, PixelColor, Point, RgbColor},
     text::Text,
     Drawable,
@@ -777,7 +777,7 @@ impl UpcomingTrainsRender {
                 match septa_api
                     .arrivals(ArrivalsRequest {
                         station: task_station.clone(),
-                        results: Some(3),
+                        results: Some(10),
                         direction: None,
                     })
                     .await
@@ -795,7 +795,7 @@ impl UpcomingTrainsRender {
                         arrivals.sort_by(|a, b| a.sched_time.cmp(&b.sched_time));
 
                         let mut state_unlocked = task_state.lock();
-                        state_unlocked.arrivals = arrivals;
+                        state_unlocked.arrivals = arrivals.into_iter().take(10).collect::<Vec<_>>();
                     }
                     Err(e) => error!("Could not get updated information {e}"),
                 }
@@ -818,11 +818,6 @@ impl UpcomingTrainsRender {
     }
 }
 
-type TileViews<'a, C> = chain! {
-    Image<'a, Bmp<'a, C>>,
-    Text<'a, MonoTextStyle<'static, C>>
-};
-
 type UpcomingArrivalViews<'a, C> = chain! {
     Text<'a, MonoTextStyle<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>,
@@ -831,8 +826,7 @@ type UpcomingArrivalViews<'a, C> = chain! {
 };
 
 #[derive(ViewGroup)]
-enum LayoutView<'a, C: PixelColor + From<Rgb555> + From<Rgb565> + From<Rgb888>> {
-    Title(LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, TileViews<'a, C>>),
+enum LayoutView<'a, C: PixelColor> {
     UpcomingArrival(
         LinearLayout<
             Horizontal<vertical::Center, spacing::FixedMargin>,
@@ -852,20 +846,7 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTr
         let station_name = self.station.to_string();
         let state_unlocked = self.state.lock();
 
-        let mut layouts = Vec::new();
-
-        layouts.push(LayoutView::Title(
-            LinearLayout::horizontal(Chain::new(Image::new(&*SEPTA_BMP, Point::zero())).append(
-                Text::new(
-                    &station_name,
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
-                ),
-            ))
-            .with_alignment(vertical::Center)
-            .with_spacing(spacing::FixedMargin(6))
-            .arrange(),
-        ));
+        let mut arrival_layouts = Vec::new();
 
         let format_strings = state_unlocked
             .arrivals
@@ -879,7 +860,7 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTr
             .collect::<Vec<_>>();
 
         if state_unlocked.arrivals.is_empty() {
-            layouts.push(LayoutView::NoArrival(
+            arrival_layouts.push(LayoutView::NoArrival(
                 LinearLayout::horizontal(Chain::new(Text::new(
                     "No upcoming arrivals",
                     Point::zero(),
@@ -917,7 +898,7 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTr
                     MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
                 ));
 
-                layouts.push(LayoutView::UpcomingArrival(
+                arrival_layouts.push(LayoutView::UpcomingArrival(
                     LinearLayout::horizontal(chain)
                         .with_alignment(vertical::Center)
                         .with_spacing(spacing::FixedMargin(6))
@@ -926,11 +907,29 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTr
             }
         }
 
-        LinearLayout::vertical(Views::new(layouts.as_mut_slice()))
-            .with_spacing(spacing::FixedMargin(2))
-            .arrange()
-            .draw(canvas)
-            .unwrap();
+        LinearLayout::vertical(
+            Chain::new(
+                LinearLayout::horizontal(
+                    Chain::new(Image::new(&*SEPTA_BMP, Point::zero())).append(Text::new(
+                        &station_name,
+                        Point::zero(),
+                        MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
+                    )),
+                )
+                .with_alignment(vertical::Center)
+                .with_spacing(spacing::FixedMargin(6))
+                .arrange(),
+            )
+            .append(
+                LinearLayout::vertical(Views::new(arrival_layouts.as_mut_slice()))
+                    .with_spacing(spacing::FixedMargin(3))
+                    .arrange(),
+            ),
+        )
+        .with_spacing(spacing::FixedMargin(2))
+        .arrange()
+        .draw(canvas)
+        .unwrap();
 
         Ok(())
     }

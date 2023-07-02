@@ -3,9 +3,8 @@ use anyhow::{anyhow, Context, Result};
 use embedded_graphics::{
     image::Image,
     mono_font::{self, MonoTextStyle},
-    pixelcolor::Rgb888,
+    pixelcolor::{Rgb555, Rgb565, Rgb888},
     prelude::{DrawTarget, PixelColor, Point, RgbColor},
-    primitives::Rectangle,
     text::Text,
     Drawable,
 };
@@ -17,6 +16,7 @@ use embedded_layout::{
     View,
 };
 use embedded_layout::{layout::linear::spacing, prelude::Link};
+use embedded_layout_macros::ViewGroup;
 use geoutils::{Distance, Location};
 use home_assistant_rest::get::StateEnum;
 use log::{debug, error, trace, warn};
@@ -738,8 +738,7 @@ impl Drop for TransitRender {
 
 #[derive(Debug, Default)]
 struct UpcomingTrainsState {
-    southbound: Vec<Arrivals>,
-    northbound: Vec<Arrivals>,
+    arrivals: Vec<Arrivals>,
 }
 
 pub(crate) struct UpcomingTrainsRender {
@@ -784,14 +783,19 @@ impl UpcomingTrainsRender {
                     .await
                 {
                     Ok(response) => {
-                        let mut state_unlocked = task_state.lock();
-                        state_unlocked.northbound = response.northbound;
-                        state_unlocked.southbound = response.southbound;
-
                         println!(
                             "northbound: {:?}, southbound: {:?}",
-                            state_unlocked.northbound, state_unlocked.southbound
+                            response.northbound, response.southbound
                         );
+
+                        // Sort the arrivals
+                        let mut arrivals = Vec::new();
+                        arrivals.extend(response.northbound.into_iter());
+                        arrivals.extend(response.southbound.into_iter());
+                        arrivals.sort_by(|a, b| a.sched_time.cmp(&b.sched_time));
+
+                        let mut state_unlocked = task_state.lock();
+                        state_unlocked.arrivals = arrivals;
                     }
                     Err(e) => error!("Could not get updated information {e}"),
                 }
@@ -814,6 +818,11 @@ impl UpcomingTrainsRender {
     }
 }
 
+type TileViews<'a, C> = chain! {
+    Image<'a, Bmp<'a, C>>,
+    Text<'a, MonoTextStyle<'static, C>>
+};
+
 type UpcomingArrivalViews<'a, C> = chain! {
     Text<'a, MonoTextStyle<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>,
@@ -821,7 +830,9 @@ type UpcomingArrivalViews<'a, C> = chain! {
     Text<'a, MonoTextStyle<'static, C>>
 };
 
-enum LayoutView<'a, C: PixelColor> {
+#[derive(ViewGroup)]
+enum LayoutView<'a, C: PixelColor + From<Rgb555> + From<Rgb565> + From<Rgb888>> {
+    Title(LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, TileViews<'a, C>>),
     UpcomingArrival(
         LinearLayout<
             Horizontal<vertical::Center, spacing::FixedMargin>,
@@ -836,56 +847,41 @@ enum LayoutView<'a, C: PixelColor> {
     ),
 }
 
-impl<C: PixelColor> View for LayoutView<'_, C> {
-    #[inline]
-    fn translate_impl(&mut self, by: Point) {
-        match self {
-            LayoutView::UpcomingArrival(layout) => View::translate_impl(layout, by),
-            LayoutView::NoArrival(layout) => View::translate_impl(layout, by),
-        }
-    }
-
-    #[inline]
-    fn bounds(&self) -> Rectangle {
-        match self {
-            LayoutView::UpcomingArrival(layout) => View::bounds(layout),
-            LayoutView::NoArrival(layout) => View::bounds(layout),
-        }
-    }
-}
-
-impl<C> Drawable for LayoutView<'_, C>
-where
-    C: PixelColor,
-{
-    type Color = C;
-    type Output = ();
-
-    fn draw<D>(&self, target: &mut D) -> std::result::Result<Self::Output, D::Error>
-    where
-        D: DrawTarget<Color = Self::Color>,
-    {
-        match self {
-            LayoutView::UpcomingArrival(text) => text.draw(target)?,
-            LayoutView::NoArrival(text) => text.draw(target)?,
-        }
-
-        Ok(())
-    }
-}
-
 impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTrainsRender {
     fn render(&self, canvas: &mut D) -> Result<()> {
         let station_name = self.station.to_string();
         let state_unlocked = self.state.lock();
 
-        let mut northbound_layouts = Vec::new();
-        let mut format_strings = Vec::new();
+        let mut layouts = Vec::new();
 
-        if state_unlocked.northbound.is_empty() {
-            northbound_layouts.push(LayoutView::NoArrival(
+        layouts.push(LayoutView::Title(
+            LinearLayout::horizontal(Chain::new(Image::new(&*SEPTA_BMP, Point::zero())).append(
+                Text::new(
+                    &station_name,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
+                ),
+            ))
+            .with_alignment(vertical::Center)
+            .with_spacing(spacing::FixedMargin(6))
+            .arrange(),
+        ));
+
+        let format_strings = state_unlocked
+            .arrivals
+            .iter()
+            .map(|arrival| {
+                (
+                    arrival.sched_time.format("%_H:%M").to_string(),
+                    arrival.destination.to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        if state_unlocked.arrivals.is_empty() {
+            layouts.push(LayoutView::NoArrival(
                 LinearLayout::horizontal(Chain::new(Text::new(
-                    "No Status",
+                    "No upcoming arrivals",
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
                 )))
@@ -894,14 +890,7 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTr
                 .arrange(),
             ));
         } else {
-            for train in state_unlocked.northbound.iter() {
-                format_strings.push((
-                    train.sched_time.format("%_H:%M").to_string(),
-                    train.destination.to_string(),
-                ));
-            }
-
-            for (index, train) in state_unlocked.northbound.iter().enumerate() {
+            for (index, train) in state_unlocked.arrivals.iter().enumerate() {
                 let text_color = match train.status.as_str() {
                     "On Time" => Rgb888::GREEN,
                     _ => Rgb888::RED,
@@ -928,7 +917,7 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTr
                     MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
                 ));
 
-                northbound_layouts.push(LayoutView::UpcomingArrival(
+                layouts.push(LayoutView::UpcomingArrival(
                     LinearLayout::horizontal(chain)
                         .with_alignment(vertical::Center)
                         .with_spacing(spacing::FixedMargin(6))
@@ -937,28 +926,11 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTr
             }
         }
 
-        LinearLayout::vertical(
-            Chain::new(
-                LinearLayout::horizontal(
-                    Chain::new(Image::new(&*SEPTA_BMP, Point::zero())).append(Text::new(
-                        &station_name,
-                        Point::zero(),
-                        MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
-                    )),
-                )
-                .with_spacing(spacing::FixedMargin(6))
-                .arrange(),
-            )
-            .append(Text::new(
-                "Northbound",
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_7X13_BOLD, Rgb888::WHITE),
-            ))
-            .append(Views::new(northbound_layouts.as_mut_slice())),
-        )
-        .arrange()
-        .draw(canvas)
-        .unwrap();
+        LinearLayout::vertical(Views::new(layouts.as_mut_slice()))
+            .with_spacing(spacing::FixedMargin(2))
+            .arrange()
+            .draw(canvas)
+            .unwrap();
 
         Ok(())
     }

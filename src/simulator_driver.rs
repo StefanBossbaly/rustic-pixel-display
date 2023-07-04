@@ -22,6 +22,11 @@ pub(crate) struct SimulatorDriver {
     driver_thread_handle: Option<thread::JoinHandle<Result<()>>>,
 }
 
+const DISPLAY_SIZE: Size = Size {
+    width: 256,
+    height: 128,
+};
+
 impl SimulatorDriver {
     pub(crate) fn new(
         render: Box<dyn Render<SimulatorDisplay<Rgb888>> + Send + Sync>,
@@ -30,17 +35,14 @@ impl SimulatorDriver {
         let alive_driver = alive.clone();
 
         let driver_thread_handle = thread::spawn(move || -> Result<()> {
-            let output_settings = OutputSettingsBuilder::new().scale(8).max_fps(120).build();
+            let output_settings = OutputSettingsBuilder::new().scale(4).max_fps(60).build();
             let mut window = Window::new("Simulator", &output_settings);
 
-            let mut canvas = SimulatorDisplay::<Rgb888>::new(Size::new(256, 128));
+            let mut canvas = SimulatorDisplay::<Rgb888>::new(DISPLAY_SIZE);
 
             while alive_driver.load(Ordering::SeqCst) {
                 canvas
-                    .fill_solid(
-                        &Rectangle::new(Point::zero(), Size::new(256, 128)),
-                        Rgb888::BLACK,
-                    )
+                    .fill_solid(&Rectangle::new(Point::zero(), DISPLAY_SIZE), Rgb888::BLACK)
                     .unwrap();
                 render.render(&mut canvas).unwrap();
                 window.update(&canvas);

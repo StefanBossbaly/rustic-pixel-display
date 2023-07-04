@@ -777,7 +777,7 @@ impl UpcomingTrainsRender {
                 match septa_api
                     .arrivals(ArrivalsRequest {
                         station: task_station.clone(),
-                        results: Some(10),
+                        results: Some(15),
                         direction: None,
                     })
                     .await
@@ -795,7 +795,7 @@ impl UpcomingTrainsRender {
                         arrivals.sort_by(|a, b| a.sched_time.cmp(&b.sched_time));
 
                         let mut state_unlocked = task_state.lock();
-                        state_unlocked.arrivals = arrivals.into_iter().take(10).collect::<Vec<_>>();
+                        state_unlocked.arrivals = arrivals.into_iter().collect::<Vec<_>>();
                     }
                     Err(e) => error!("Could not get updated information {e}"),
                 }
@@ -845,6 +845,23 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTr
     fn render(&self, canvas: &mut D) -> Result<()> {
         let station_name = self.station.to_string();
         let state_unlocked = self.state.lock();
+
+        let canvas_bounding_box = canvas.bounding_box();
+        let mut remaining_height = canvas_bounding_box.size.height;
+
+        // Generate the title layout
+        let title_layout = LinearLayout::horizontal(
+            Chain::new(Image::new(&*SEPTA_BMP, Point::zero())).append(Text::new(
+                &station_name,
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
+            )),
+        )
+        .with_alignment(vertical::Center)
+        .with_spacing(spacing::FixedMargin(6))
+        .arrange();
+
+        remaining_height -= title_layout.bounds().size.height;
 
         let mut arrival_layouts = Vec::new();
 
@@ -898,6 +915,14 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTr
                     MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
                 ));
 
+                let chain_height = chain.bounds().size.height;
+
+                if remaining_height < chain_height {
+                    break;
+                }
+
+                remaining_height -= chain.bounds().size.height;
+
                 arrival_layouts.push(LayoutView::UpcomingArrival(
                     LinearLayout::horizontal(chain)
                         .with_alignment(vertical::Center)
@@ -908,19 +933,7 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingTr
         }
 
         LinearLayout::vertical(
-            Chain::new(
-                LinearLayout::horizontal(
-                    Chain::new(Image::new(&*SEPTA_BMP, Point::zero())).append(Text::new(
-                        &station_name,
-                        Point::zero(),
-                        MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
-                    )),
-                )
-                .with_alignment(vertical::Center)
-                .with_spacing(spacing::FixedMargin(6))
-                .arrange(),
-            )
-            .append(
+            Chain::new(title_layout).append(
                 LinearLayout::vertical(Views::new(arrival_layouts.as_mut_slice()))
                     .with_spacing(spacing::FixedMargin(3))
                     .arrange(),

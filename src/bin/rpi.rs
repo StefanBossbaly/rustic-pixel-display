@@ -1,32 +1,15 @@
-// TODO: Remove once code is more stable
-#![allow(dead_code)]
-
-#[macro_use]
-extern crate lazy_static;
-
 use anyhow::Result;
+use rustic_pixel_display::{rpi, transit};
 
 #[cfg(feature = "http_server")]
-mod http_server;
-
-#[cfg(feature = "http_server")]
-#[macro_use]
-extern crate rocket;
-
-#[cfg(feature = "simulator")]
-mod simulator_driver;
-
-mod config;
-mod led_driver;
-mod render;
-mod transit;
+use rustic_pixel_display::http_server;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
 
     let transit_render = Box::new(transit::UpcomingTrainsRender::new(
-        septa_api::types::RegionalRailStop::Downingtown,
+        septa_api::types::RegionalRailStop::SuburbanStation,
     ));
 
     #[cfg(feature = "http_server")]
@@ -34,7 +17,7 @@ async fn main() -> Result<()> {
         let (http_to_driver_sender, http_to_driver_receiver) = std::sync::mpsc::channel();
         let (driver_to_http_sender, driver_to_http_receiver) = std::sync::mpsc::channel();
 
-        let _led_driver = led_driver::LedDriver::new(
+        let _led_driver = rpi::LedDriver::new(
             transit_render,
             Some((driver_to_http_sender, http_to_driver_receiver)),
         )?;
@@ -48,11 +31,7 @@ async fn main() -> Result<()> {
 
     #[cfg(not(feature = "http_server"))]
     {
-        #[cfg(feature = "simulator")]
-        let _led_driver = simulator_driver::SimulatorDriver::new(transit_render)?;
-
-        #[cfg(not(feature = "simulator"))]
-        let _led_driver = led_driver::LedDriver::new(transit_render, None)?;
+        let _led_driver = rpi::LedDriver::new(transit_render, None)?;
 
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {

@@ -444,7 +444,7 @@ enum SupplementalTransitInfo {
     ),
 }
 
-pub(crate) struct TransitRender {
+pub struct TransitRender {
     state: Arc<Mutex<StateHolder>>,
 
     cancel_token: CancellationToken,
@@ -520,7 +520,7 @@ impl TransitRender {
         }
     }
 
-    pub(crate) fn new(config: TransitConfig) -> Result<Self, Box<dyn Error>> {
+    pub fn new(config: TransitConfig) -> Result<Self, Box<dyn Error>> {
         let septa_client = septa_api::Client::new();
         let home_assistant_client = home_assistant_rest::Client::new(
             &config.home_assistant_url,
@@ -627,7 +627,7 @@ impl TransitRender {
         })
     }
 
-    pub(crate) fn from_config() -> Result<Self, Box<dyn Error>> {
+    pub fn from_config() -> Result<Self, Box<dyn Error>> {
         Self::new(Self::read_config()?)
     }
 }
@@ -741,7 +741,7 @@ struct UpcomingTrainsState {
     arrivals: Vec<Arrivals>,
 }
 
-pub(crate) struct UpcomingTrainsRender {
+pub struct UpcomingTrainsRender {
     state: Arc<Mutex<UpcomingTrainsState>>,
 
     /// The regional rail stop
@@ -760,7 +760,7 @@ lazy_static! {
 }
 
 impl UpcomingTrainsRender {
-    pub(crate) fn new(station: RegionalRailStop) -> Self {
+    pub fn new(station: RegionalRailStop) -> Self {
         let septa_api = septa_api::Client::new();
 
         let state = Arc::new(Mutex::new(UpcomingTrainsState::default()));

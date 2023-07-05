@@ -14,7 +14,7 @@ use std::{
     thread,
 };
 
-pub(crate) struct SimulatorDriver {
+pub struct SimulatorDriver {
     /// Flag used to gracefully terminate the render and driver threads
     alive: Arc<AtomicBool>,
 
@@ -28,9 +28,7 @@ const DISPLAY_SIZE: Size = Size {
 };
 
 impl SimulatorDriver {
-    pub(crate) fn new(
-        render: Box<dyn Render<SimulatorDisplay<Rgb888>> + Send + Sync>,
-    ) -> Result<Self> {
+    pub fn new(render: Box<dyn Render<SimulatorDisplay<Rgb888>> + Send + Sync>) -> Result<Self> {
         let alive = Arc::new(AtomicBool::new(true));
         let alive_driver = alive.clone();
 

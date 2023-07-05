@@ -14,14 +14,11 @@ license = "GPL"
 [features]
 default = []
 http_server = ["dep:rocket", "dep:rocket_dyn_templates"]
-simulator = ["dep:embedded-graphics-simulator"]
 
 [dependencies]
-rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", features = ["drawing", "embedded-graphics"] }
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7.8"
 embedded-graphics = "0.8.0"
-embedded-graphics-simulator = { version = "0.5.0", optional = true }
 embedded-layout-macros = { git = "https://github.com/bugadani/embedded-layout.git", branch = "master" }
 embedded-layout = { git = "https://github.com/bugadani/embedded-layout.git", branch = "master" }
 rocket = { version = "=0.5.0-rc.3", features = ["json"], optional = true }
@@ -39,3 +36,15 @@ log = "0.4.19"
 parking_lot = "0.12.1"
 tinybmp = "0.5.0"
 env_logger = "0.10.0"
+embedded-graphics-simulator = "0.5.0"
+rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", features = ["drawing", "embedded-graphics"] }
+
+[lib]
+name = "rustic_pixel_display"
+path = "src/lib.rs"
+
+[[bin]]
+name = "simulator"
+
+[[bin]]
+name = "rpi"

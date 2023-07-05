@@ -1,11 +1,15 @@
-use crate::{config, render::Render};
+use crate::{
+    config::{self, HardwareConfig, RxEvent, TxEvent},
+    render::Render,
+};
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info, trace, warn};
-use rpi_led_panel::{Canvas, RGBMatrix};
+use rpi_led_panel::{Canvas, RGBMatrix, RGBMatrixConfig};
 use std::{
     fs::File,
     io::{BufReader, BufWriter, Write},
     path::PathBuf,
+    str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::RecvTimeoutError,
@@ -15,16 +19,7 @@ use std::{
     time::Duration,
 };
 
-#[derive(Debug, Clone)]
-pub(crate) enum RxEvent {
-    UpdateMatrixConfig(config::HardwareConfig),
-}
-
-pub(crate) enum TxEvent {
-    UpdateMatrixConfig(config::HardwareConfig),
-}
-
-pub(crate) struct LedDriver {
+pub struct LedDriver {
     /// Flag used to gracefully terminate the render and driver threads
     alive: Arc<AtomicBool>,
 
@@ -38,7 +33,7 @@ pub(crate) struct LedDriver {
 impl LedDriver {
     const CONFIG_FILE: &'static str = "led-statusboard.yaml";
 
-    pub(crate) fn new(
+    pub fn new(
         render: Box<dyn Render<rpi_led_panel::Canvas> + Send + Sync>,
         event_sender_receiver: Option<(
             std::sync::mpsc::Sender<TxEvent>,
@@ -197,6 +192,7 @@ impl LedDriver {
         serde_yaml::from_reader(file_reader).context("Unable to parse YAML file")
     }
 
+    #[allow(dead_code)]
     fn write_config(config: &config::HardwareConfig) -> Result<()> {
         let file_writer = BufWriter::new(Self::get_config_file()?);
         serde_yaml::to_writer(file_writer, config).context("Could not write to YAML file")?;
@@ -229,5 +225,43 @@ impl Drop for LedDriver {
                 .expect("Failed to join the driver thread")
                 .expect("Driver thread encountered an error");
         }
+    }
+}
+
+impl TryFrom<HardwareConfig> for RGBMatrixConfig {
+    type Error = Box<dyn std::error::Error>;
+
+    fn try_from(config: HardwareConfig) -> Result<Self, Self::Error> {
+        Ok(RGBMatrixConfig {
+            hardware_mapping: rpi_led_panel::HardwareMapping::from_str(
+                config.hardware_mapping.as_ref(),
+            )?,
+            rows: config.rows,
+            cols: config.cols,
+            refresh_rate: config.refresh_rate,
+            pi_chip: match config.pi_chip {
+                Some(pi_chip) => Some(rpi_led_panel::PiChip::from_str(pi_chip.as_ref())?),
+                None => None,
+            },
+            pwm_bits: config.pwm_bits,
+            pwm_lsb_nanoseconds: config.pwm_lsb_nanoseconds,
+            slowdown: config.slowdown,
+            interlaced: config.interlaced,
+            dither_bits: config.dither_bits,
+            chain_length: config.chain_length,
+            parallel: config.parallel,
+            panel_type: match config.panel_type {
+                Some(panel_type) => Some(rpi_led_panel::PanelType::from_str(panel_type.as_ref())?),
+                None => None,
+            },
+            multiplexing: match config.multiplexing {
+                Some(multiplexing) => Some(rpi_led_panel::MultiplexMapperType::from_str(
+                    multiplexing.as_ref(),
+                )?),
+                None => None,
+            },
+            row_setter: rpi_led_panel::RowAddressSetterType::from_str(config.row_setter.as_ref())?,
+            led_sequence: rpi_led_panel::LedSequence::from_str(config.led_sequence.as_ref())?,
+        })
     }
 }

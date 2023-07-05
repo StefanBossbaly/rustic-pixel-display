@@ -6,5 +6,5 @@ pub mod http_server;
 
 pub mod config;
 pub mod render;
+pub mod renders;
 pub mod rpi;
-pub mod transit;

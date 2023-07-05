@@ -7,7 +7,7 @@ use embedded_graphics::{
 use embedded_graphics_simulator::{
     OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use rustic_pixel_display::{render::Render, transit};
+use rustic_pixel_display::{render::Render, renders::upcoming_arrivals::UpcomingArrivals};
 
 const DISPLAY_SIZE: Size = Size {
     width: 256,
@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
     let mut window = Window::new("Simulator", &output_settings);
     let mut canvas = SimulatorDisplay::<Rgb888>::new(DISPLAY_SIZE);
 
-    let transit_render = Box::new(transit::UpcomingTrainsRender::new(
+    let transit_render = Box::new(UpcomingArrivals::new(
         septa_api::types::RegionalRailStop::SuburbanStation,
     ));
 

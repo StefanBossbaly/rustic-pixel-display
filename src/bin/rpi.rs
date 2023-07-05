@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rustic_pixel_display::{rpi, transit};
+use rustic_pixel_display::{renders::upcoming_arrivals::UpcomingArrivals, rpi};
 
 #[cfg(feature = "http_server")]
 use rustic_pixel_display::http_server;
@@ -8,7 +8,7 @@ use rustic_pixel_display::http_server;
 async fn main() -> Result<()> {
     env_logger::init();
 
-    let transit_render = Box::new(transit::UpcomingTrainsRender::new(
+    let transit_render = Box::new(UpcomingArrivals::new(
         septa_api::types::RegionalRailStop::SuburbanStation,
     ));
 

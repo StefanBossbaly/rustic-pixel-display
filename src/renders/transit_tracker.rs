@@ -708,6 +708,10 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
 impl Configurable for TransitTracker {
     type Config = TransitConfig;
 
+    fn config_name() -> &'static str {
+        "transit_tracker"
+    }
+
     fn load_from_config(config: Self::Config) -> Result<Self> {
         TransitTracker::new(config)
     }

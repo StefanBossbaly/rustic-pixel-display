@@ -14,5 +14,7 @@ pub trait Render<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
 pub trait Configurable: Sized {
     type Config: DeserializeOwned;
 
+    fn config_name() -> &'static str;
+
     fn load_from_config(config: Self::Config) -> Result<Self>;
 }

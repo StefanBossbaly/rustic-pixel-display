@@ -250,6 +250,10 @@ pub struct UpcomingArrivalsConfig {
 impl Configurable for UpcomingArrivals {
     type Config = UpcomingArrivalsConfig;
 
+    fn config_name() -> &'static str {
+        "upcoming_arrivals"
+    }
+
     fn load_from_config(config: Self::Config) -> Result<Self> {
         Ok(Self::new(config.station, config.limit.unwrap_or(20)))
     }

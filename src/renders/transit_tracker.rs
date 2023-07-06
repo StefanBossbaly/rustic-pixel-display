@@ -1,5 +1,5 @@
-use crate::{config::TransitConfig, render::Render};
-use anyhow::{anyhow, Context, Result};
+use crate::render::{Configurable, Render};
+use anyhow::{anyhow, Result};
 use embedded_graphics::{
     image::Image,
     mono_font::{self, MonoTextStyle},
@@ -18,13 +18,10 @@ use home_assistant_rest::get::StateEnum;
 use log::{debug, error, trace, warn};
 use parking_lot::Mutex;
 use septa_api::{responses::Train, types::RegionalRailStop};
+use serde::Deserialize;
 use std::{
     collections::HashMap,
     convert::Infallible,
-    error::Error,
-    fs::File,
-    io::BufReader,
-    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -102,6 +99,13 @@ enum TransitState {
     NoStatus(NoStatusTracker),
     AtStation(StationTracker),
     OnTrain(TrainTracker),
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct TransitConfig {
+    pub(crate) home_assistant_url: String,
+    pub(crate) home_assistant_bearer_token: String,
+    pub(crate) person_entity_id: String,
 }
 
 impl Default for TransitState {
@@ -449,20 +453,7 @@ pub struct TransitTracker {
 }
 
 impl TransitTracker {
-    const CONFIG_FILE: &'static str = "transit_tracker.yaml";
     const SEPTA_IMAGE_BIG: &[u8] = include_bytes!("../../assets/SEPTA.bmp");
-
-    fn get_config_file() -> Result<File> {
-        let home_dir = std::env::var("HOME").context("Can not load HOME environment variable")?;
-        let mut file_path = PathBuf::from(home_dir);
-        file_path.push(Self::CONFIG_FILE);
-        File::open(file_path).with_context(|| format!("Failed to open file {}", Self::CONFIG_FILE))
-    }
-
-    fn read_config() -> Result<TransitConfig> {
-        let file_reader = BufReader::new(Self::get_config_file()?);
-        serde_yaml::from_reader(file_reader).context("Unable to parse YAML file")
-    }
 
     async fn get_location(
         home_assistant_client: &home_assistant_rest::Client,
@@ -512,7 +503,7 @@ impl TransitTracker {
         }
     }
 
-    pub fn new(config: TransitConfig) -> Result<Self, Box<dyn Error>> {
+    pub fn new(config: TransitConfig) -> Result<Self> {
         let septa_client = septa_api::Client::new();
         let home_assistant_client = home_assistant_rest::Client::new(
             &config.home_assistant_url,
@@ -618,10 +609,6 @@ impl TransitTracker {
             supplement_transit_info,
         })
     }
-
-    pub fn from_config() -> Result<Self, Box<dyn Error>> {
-        Self::new(Self::read_config()?)
-    }
 }
 
 impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTracker {
@@ -715,6 +702,14 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
         .draw(canvas)?;
 
         Ok(())
+    }
+}
+
+impl Configurable for TransitTracker {
+    type Config = TransitConfig;
+
+    fn load_from_config(config: Self::Config) -> Result<Self> {
+        TransitTracker::new(config)
     }
 }
 

@@ -1,4 +1,7 @@
-use crate::config::{self, TransitConfig};
+use crate::{
+    config::{self},
+    renders::transit_tracker::TransitConfig,
+};
 use embedded_graphics::mono_font;
 use rocket::{FromForm, FromFormField};
 use serde::Serialize;
@@ -207,23 +210,21 @@ impl From<Font> for mono_font::MonoFont<'static> {
 #[allow(dead_code)]
 pub(crate) struct TransitConfigForm<'a> {
     #[field()]
-    home_assistant_url: &'a str,
+    pub(crate) home_assistant_url: &'a str,
 
     #[field()]
-    home_assistant_bearer_token: &'a str,
+    pub(crate) home_assistant_bearer_token: &'a str,
 
     #[field()]
-    person_entity_id: &'a str,
+    pub(crate) person_entity_id: &'a str,
 }
 
-impl<'a> TryFrom<&TransitConfigForm<'a>> for TransitConfig {
-    type Error = Box<dyn std::error::Error>;
-
-    fn try_from(form: &TransitConfigForm<'a>) -> Result<Self, Self::Error> {
-        Ok(Self {
+impl<'a> From<&TransitConfigForm<'a>> for TransitConfig {
+    fn from(form: &TransitConfigForm<'a>) -> Self {
+        Self {
             home_assistant_url: form.home_assistant_url.to_string(),
             home_assistant_bearer_token: form.home_assistant_bearer_token.to_string(),
             person_entity_id: form.person_entity_id.to_string(),
-        })
+        }
     }
 }

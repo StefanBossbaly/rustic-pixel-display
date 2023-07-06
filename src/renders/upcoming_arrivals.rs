@@ -1,4 +1,4 @@
-use crate::render::Render;
+use crate::render::{Configurable, Render};
 use anyhow::Result;
 use embedded_graphics::{
     image::Image,
@@ -20,6 +20,7 @@ use embedded_layout_macros::ViewGroup;
 use log::error;
 use parking_lot::Mutex;
 use septa_api::{requests::ArrivalsRequest, responses::Arrivals, types::RegionalRailStop};
+use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc, time::Duration};
 use tinybmp::Bmp;
 use tokio::{select, task::JoinHandle};
@@ -49,7 +50,7 @@ lazy_static! {
 }
 
 impl UpcomingArrivals {
-    pub fn new(station: RegionalRailStop) -> Self {
+    pub fn new(station: RegionalRailStop, results: u8) -> Self {
         let septa_api = septa_api::Client::new();
 
         let state = Arc::new(Mutex::new(UpcomingTrainsState::default()));
@@ -66,7 +67,7 @@ impl UpcomingArrivals {
                 match septa_api
                     .arrivals(ArrivalsRequest {
                         station: task_station.clone(),
-                        results: Some(15),
+                        results: Some(results),
                         direction: None,
                     })
                     .await
@@ -84,7 +85,10 @@ impl UpcomingArrivals {
                         arrivals.sort_by(|a, b| a.sched_time.cmp(&b.sched_time));
 
                         let mut state_unlocked = task_state.lock();
-                        state_unlocked.arrivals = arrivals.into_iter().collect::<Vec<_>>();
+                        state_unlocked.arrivals = arrivals
+                            .into_iter()
+                            .take((results * 2) as usize)
+                            .collect::<Vec<_>>();
                     }
                     Err(e) => error!("Could not get updated information {e}"),
                 }
@@ -234,6 +238,20 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingAr
         .unwrap();
 
         Ok(())
+    }
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct UpcomingArrivalsConfig {
+    station: RegionalRailStop,
+    limit: Option<u8>,
+}
+
+impl Configurable for UpcomingArrivals {
+    type Config = UpcomingArrivalsConfig;
+
+    fn load_from_config(config: Self::Config) -> Result<Self> {
+        Ok(Self::new(config.station, config.limit.unwrap_or(20)))
     }
 }
 

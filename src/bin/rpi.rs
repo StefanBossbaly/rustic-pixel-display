@@ -10,6 +10,7 @@ async fn main() -> Result<()> {
 
     let transit_render = Box::new(UpcomingArrivals::new(
         septa_api::types::RegionalRailStop::SuburbanStation,
+        20,
     ));
 
     #[cfg(feature = "http_server")]

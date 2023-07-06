@@ -100,10 +100,3 @@ pub struct HardwareConfig {
     pub row_setter: RowAddressSetterType,
     pub led_sequence: LedSequence,
 }
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct TransitConfig {
-    pub home_assistant_url: String,
-    pub home_assistant_bearer_token: String,
-    pub person_entity_id: String,
-}

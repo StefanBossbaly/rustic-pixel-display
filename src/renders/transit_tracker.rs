@@ -571,8 +571,12 @@ impl TransitTracker {
                     (Err(location_error), Err(train_error)) => {
                         error!("Error in both location and SEPTA calls (location_error: {location_error}, train_error: {train_error})");
                     }
-                    (Ok(_), Err(train_error)) => {
+                    (Ok((person_name, person_state, ..)), Err(train_error)) => {
                         error!("Error in SEPTA call ({train_error})");
+
+                        let mut holder_unlocked = task_state_holder.lock();
+                        holder_unlocked.person_name = person_name;
+                        holder_unlocked.person_state = person_state;
                     }
                     (Err(location_error), Ok(_)) => {
                         error!("Error in location call ({location_error})");

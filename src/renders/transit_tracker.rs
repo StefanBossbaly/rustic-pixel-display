@@ -1,21 +1,22 @@
 use crate::render::{Configurable, Render};
 use anyhow::{anyhow, Result};
 use embedded_graphics::{
-    image::Image,
     mono_font::{self, MonoTextStyle},
     pixelcolor::Rgb888,
-    prelude::{DrawTarget, Point, RgbColor},
+    prelude::{DrawTarget, PixelColor, Point, RgbColor},
     text::Text,
     Drawable,
 };
 use embedded_layout::{
-    layout::linear::LinearLayout,
-    prelude::{horizontal, Chain},
-    view_group::Views,
+    chain,
+    layout::linear::{spacing, Horizontal, LinearLayout},
+    prelude::{horizontal, vertical, Chain, Link},
+    View,
 };
+use embedded_layout_macros::ViewGroup;
 use geoutils::{Distance, Location};
 use home_assistant_rest::get::StateEnum;
-use log::{debug, error, trace, warn};
+use log::{debug, error, warn};
 use parking_lot::Mutex;
 use septa_api::{responses::Train, types::RegionalRailStop};
 use serde::Deserialize;
@@ -26,28 +27,11 @@ use std::{
     time::{Duration, Instant},
 };
 use strum::IntoEnumIterator;
-use tinybmp::Bmp;
 use tokio::{join, select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 /// The amount of time the user has to be within the radius of a station to be considered at the station.
 const NO_STATUS_TO_AT_STATION: Duration = Duration::from_secs(30);
-
-#[derive(Debug, Default, Clone)]
-struct NoStatusTracker {
-    /// A map of the regional rail stop to the time the user entered into the radius of the station.
-    /// We use time::Instance since we need a monotonic clock and do not care about the system time.
-    station_to_first_encounter: HashMap<RegionalRailStop, Instant>,
-}
-
-#[derive(Debug, Default, Clone)]
-struct TrainEncounter {
-    /// The first time the user encountered the train inside the radius of the current station.
-    first_encounter_inside_station: Option<Instant>,
-
-    /// The first time the user encountered the train outside the radius of the current station.
-    first_encounter_outside_station: Option<Instant>,
-}
 
 // Have to wrap in lazy_static since from_meters is not a const function.
 lazy_static! {
@@ -64,19 +48,6 @@ lazy_static! {
     static ref AT_STATION_LEAVE_RADIUS: Distance = Distance::from_meters(200.0);
 }
 
-#[derive(Debug, Clone)]
-struct StationTracker {
-    /// The station the user is currently at.
-    station: RegionalRailStop,
-
-    /// A map from the unique train id to the time the user encountered the train within the radius
-    /// of a station and the time the user encountered the train outside the radius of a station.
-    train_id_to_first_encounter: HashMap<String, TrainEncounter>,
-
-    /// The time the user has been outside the radius of the station.
-    time_outside_station: Option<Instant>,
-}
-
 const ON_TRAIN_TO_NO_STATUS_TIMEOUT: Duration = Duration::from_secs(300);
 
 // Have to wrap in lazy_static since from_meters is not a const function.
@@ -85,38 +56,64 @@ lazy_static! {
     static ref ON_TRAIN_REMAIN_RADIUS: Distance = Distance::from_meters(400.0);
 }
 
-#[derive(Debug, Clone)]
-struct TrainTracker {
-    /// The unique train id.
-    train_id: String,
+#[derive(Debug, Default, Clone)]
+struct TrainEncounter {
+    /// The first time the user encountered the train inside the radius of the current station.
+    first_encounter_inside_station: Option<Instant>,
 
-    /// The time the user has been on the train.
-    last_train_encounter: Instant,
+    /// The first time the user encountered the train outside the radius of the current station.
+    first_encounter_outside_station: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 enum TransitState {
-    NoStatus(NoStatusTracker),
-    AtStation(StationTracker),
-    OnTrain(TrainTracker),
-}
+    NoStatus {
+        /// A map of the regional rail stop to the time the user entered into the radius of the station.
+        /// We use time::Instance since we need a monotonic clock and do not care about the system time.
+        station_to_first_encounter: HashMap<RegionalRailStop, Instant>,
+    },
+    AtStation {
+        /// The station the user is currently at.
+        station: RegionalRailStop,
 
-#[derive(Clone, Deserialize, Debug)]
-pub struct TransitConfig {
-    pub(crate) home_assistant_url: String,
-    pub(crate) home_assistant_bearer_token: String,
-    pub(crate) person_entity_id: String,
+        /// A map from the unique train id to the time the user encountered the train within the radius
+        /// of a station and the time the user encountered the train outside the radius of a station.
+        train_id_to_first_encounter: HashMap<String, TrainEncounter>,
+
+        /// The time the user has been outside the radius of the station.
+        time_outside_station: Option<Instant>,
+    },
+    OnTrain {
+        /// The unique train id.
+        train_id: String,
+
+        /// The train
+        train: Train,
+
+        /// The time the user has been on the train.
+        last_train_encounter: Instant,
+    },
 }
 
 impl Default for TransitState {
     fn default() -> Self {
-        Self::new()
+        Self::NoStatus {
+            station_to_first_encounter: HashMap::new(),
+        }
     }
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct TransitTrackerConfig {
+    pub home_assistant_url: String,
+    pub home_assistant_bearer_token: String,
+    pub person_entity_id: String,
 }
 
 impl TransitState {
     fn new() -> Self {
-        TransitState::NoStatus(NoStatusTracker::default())
+        Self::default()
     }
 
     fn update_state(self, lat_lon: (f64, f64), trains: Vec<Train>) -> Result<Self> {
@@ -125,7 +122,9 @@ impl TransitState {
         let person_location = Location::new(lat_lon.0, lat_lon.1);
 
         Ok(match self {
-            TransitState::NoStatus(mut tracker) => {
+            TransitState::NoStatus {
+                mut station_to_first_encounter,
+            } => {
                 let mut eligible_stations = Vec::new();
 
                 // See if we are currently in any station's radius
@@ -139,27 +138,27 @@ impl TransitState {
                         .is_in_circle(&station_location, *AT_STATION_ENTER_RADIUS)
                         .expect("is_in_circle failed")
                     {
-                        match tracker.station_to_first_encounter.get(&station) {
+                        match station_to_first_encounter.get(&station) {
                             Some(first_encounter) => {
                                 if now - *first_encounter > NO_STATUS_TO_AT_STATION {
                                     eligible_stations.push(station);
                                 }
                             }
                             None => {
-                                tracker
-                                    .station_to_first_encounter
-                                    .insert(station.clone(), now);
+                                station_to_first_encounter.insert(station.clone(), now);
                             }
                         }
                     } else {
                         // We are not in the radius of the station, so remove it from the map
-                        tracker.station_to_first_encounter.remove(&station);
+                        station_to_first_encounter.remove(&station);
                     }
                 }
 
                 // Iterate over eligible stations, if there are more than one, pick the closest one
                 match eligible_stations.len() {
-                    0 => TransitState::NoStatus(tracker),
+                    0 => TransitState::NoStatus {
+                        station_to_first_encounter,
+                    },
                     1 => {
                         let station = eligible_stations[0].clone();
 
@@ -167,11 +166,11 @@ impl TransitState {
                             "Transitioning from NoStatus to AtStation (station: {})",
                             station.to_string()
                         );
-                        TransitState::AtStation(StationTracker {
+                        TransitState::AtStation {
                             station,
                             train_id_to_first_encounter: HashMap::new(),
                             time_outside_station: None,
-                        })
+                        }
                     }
                     _ => {
                         let mut closest_station = eligible_stations[0].clone();
@@ -196,17 +195,21 @@ impl TransitState {
                             "Transitioning from NoStatus to AtStation for (station: {})",
                             closest_station.to_string()
                         );
-                        TransitState::AtStation(StationTracker {
+                        TransitState::AtStation {
                             station: closest_station,
                             train_id_to_first_encounter: HashMap::new(),
                             time_outside_station: None,
-                        })
+                        }
                     }
                 }
             }
-            TransitState::AtStation(mut tracker) => {
+            TransitState::AtStation {
+                station,
+                mut train_id_to_first_encounter,
+                mut time_outside_station,
+            } => {
                 let station_location = {
-                    let station_lat_lon = tracker.station.lat_lon()?;
+                    let station_lat_lon = station.lat_lon()?;
                     Location::new(station_lat_lon.0, station_lat_lon.1)
                 };
 
@@ -217,17 +220,17 @@ impl TransitState {
                     .map_err(|e| anyhow!("distance_to failed: {}", e))?
                 {
                     // We are still at the station, so update the time we have been outside the station
-                    tracker.time_outside_station = None;
+                    time_outside_station = None;
                 } else {
                     // We are no longer at the station, so update the time we have been outside the station
-                    match tracker.time_outside_station {
+                    match time_outside_station {
                         Some(first_left) => {
                             if now - first_left > AT_STATION_TO_NO_STATUS_TIMEOUT {
                                 is_outside_location = true;
                             }
                         }
                         None => {
-                            tracker.time_outside_station = Some(now);
+                            time_outside_station = Some(now);
                         }
                     }
                 }
@@ -235,9 +238,9 @@ impl TransitState {
                 if is_outside_location {
                     debug!(
                         "Transitioning from AtStation to NoStatus (station: {})",
-                        tracker.station.to_string()
+                        station.to_string()
                     );
-                    TransitState::NoStatus(NoStatusTracker::default())
+                    TransitState::default()
                 } else {
                     // See if we are in the radius of any train
                     let mut matched_train = None;
@@ -247,10 +250,7 @@ impl TransitState {
                             .is_in_circle(&train_location, *ON_TRAIN_ENTER_RADIUS)
                             .map_err(|e| anyhow!("distance_to failed: {}", e))?
                         {
-                            match tracker
-                                .train_id_to_first_encounter
-                                .get_mut(&train.train_number)
-                            {
+                            match train_id_to_first_encounter.get_mut(&train.train_number) {
                                 Some(train_encounters) => {
                                     let currently_at_station = person_location
                                         .is_in_circle(&train_location, *AT_STATION_LEAVE_RADIUS)
@@ -275,7 +275,7 @@ impl TransitState {
                                             .first_encounter_outside_station
                                             .is_some()
                                     {
-                                        matched_train = Some(train.train_number);
+                                        matched_train = Some(train);
                                         break 'train_loop;
                                     }
                                 }
@@ -301,40 +301,46 @@ impl TransitState {
                                                 .or(Some(now));
                                     }
 
-                                    tracker
-                                        .train_id_to_first_encounter
+                                    train_id_to_first_encounter
                                         .insert(train.train_number, train_encounters);
                                 }
                             }
                         } else {
                             // We are not in the radius of the train, so remove it from the map
-                            tracker
-                                .train_id_to_first_encounter
-                                .remove(&train.train_number);
+                            train_id_to_first_encounter.remove(&train.train_number);
                         }
                     }
 
                     match matched_train {
-                        Some(train_id) => {
+                        Some(train) => {
                             debug!(
                                 "Transitioning from AtStation to OnTrain (station: {}, train: {})",
-                                tracker.station.to_string(),
-                                train_id
+                                station.to_string(),
+                                train.train_number
                             );
-                            TransitState::OnTrain(TrainTracker {
-                                train_id,
+                            TransitState::OnTrain {
+                                train_id: train.train_number.clone(),
+                                train,
                                 last_train_encounter: now,
-                            })
+                            }
                         }
-                        None => TransitState::AtStation(tracker),
+                        None => TransitState::AtStation {
+                            station,
+                            train_id_to_first_encounter,
+                            time_outside_station,
+                        },
                     }
                 }
             }
-            TransitState::OnTrain(mut tracker) => {
+            TransitState::OnTrain {
+                train_id,
+                mut last_train_encounter,
+                ..
+            } => {
                 // See if we are still in the radius of the train
                 let current_train = trains
-                    .iter()
-                    .find(|&train| train.train_number == tracker.train_id);
+                    .into_iter()
+                    .find(|train| train.train_number == train_id);
 
                 match current_train {
                     Some(train) => {
@@ -343,10 +349,13 @@ impl TransitState {
                             .is_in_circle(&train_location, *ON_TRAIN_REMAIN_RADIUS)
                             .map_err(|e| anyhow!("distance_to failed: {}", e))?
                         {
-                            tracker.last_train_encounter = now;
-                            TransitState::OnTrain(tracker)
-                        } else if tracker.last_train_encounter - now > ON_TRAIN_TO_NO_STATUS_TIMEOUT
-                        {
+                            last_train_encounter = now;
+                            TransitState::OnTrain {
+                                train_id,
+                                train,
+                                last_train_encounter,
+                            }
+                        } else if last_train_encounter - now > ON_TRAIN_TO_NO_STATUS_TIMEOUT {
                             let station: Option<RegionalRailStop> = {
                                 let mut regional_rail_stop = None;
                                 for station in RegionalRailStop::iter() {
@@ -370,29 +379,31 @@ impl TransitState {
                                 Some(station) => {
                                     debug!(
                                         "Transitioning from OnTrain to AtStation (station: {}, train: {})",
-                                        station.to_string(), tracker.train_id
+                                        station.to_string(), train_id
                                     );
-                                    TransitState::AtStation(StationTracker {
+                                    TransitState::AtStation {
                                         station,
                                         time_outside_station: None,
                                         train_id_to_first_encounter: HashMap::new(),
-                                    })
+                                    }
                                 }
                                 None => {
                                     debug!(
                                         "Transitioning from OnTrain to NoStatus (train: {})",
-                                        tracker.train_id
+                                        train_id
                                     );
-                                    TransitState::NoStatus(NoStatusTracker::default())
+                                    TransitState::default()
                                 }
                             }
                         } else {
-                            TransitState::OnTrain(tracker)
+                            TransitState::OnTrain {
+                                train_id,
+                                train,
+                                last_train_encounter,
+                            }
                         }
                     }
-                    None => TransitState::NoStatus(NoStatusTracker {
-                        station_to_first_encounter: HashMap::new(),
-                    }),
+                    None => TransitState::default(),
                 }
             }
         })
@@ -415,29 +426,46 @@ impl StateHolder {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum TrainStatus {
+    Early(i32),
+    OnTime,
+    Late(i32),
+}
+
+// TODO: Use these in render
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
 enum SimpleTransitState {
     NoStatus,
-    AtStation(RegionalRailStop),
-    OnTrain(String),
+    AtStation {
+        station_name: String,
+    },
+    OnTrain {
+        train_number: String,
+        status: TrainStatus,
+        destination: String,
+    },
 }
 
 impl From<&TransitState> for SimpleTransitState {
     fn from(value: &TransitState) -> Self {
         match value {
-            TransitState::NoStatus(_) => Self::NoStatus,
-            TransitState::AtStation(station_tracker) => {
-                Self::AtStation(station_tracker.station.clone())
-            }
-            TransitState::OnTrain(train_tracker) => Self::OnTrain(train_tracker.train_id.clone()),
+            TransitState::NoStatus { .. } => Self::NoStatus,
+            TransitState::AtStation { station, .. } => Self::AtStation {
+                station_name: station.to_string(),
+            },
+            TransitState::OnTrain { train, .. } => Self::OnTrain {
+                train_number: train.train_number.clone(),
+                status: match train.late.cmp(&0) {
+                    std::cmp::Ordering::Less => TrainStatus::Early(train.late),
+                    std::cmp::Ordering::Equal => TrainStatus::OnTime,
+                    std::cmp::Ordering::Greater => TrainStatus::Late(-train.late),
+                },
+                destination: train.dest.to_string(),
+            },
         }
     }
-}
-
-enum SupplementalTransitInfo {
-    AtStation(
-        Option<septa_api::responses::Arrivals>,
-        Option<septa_api::responses::Arrivals>,
-    ),
 }
 
 pub struct TransitTracker {
@@ -447,17 +475,12 @@ pub struct TransitTracker {
 
     /// Handle to the task used to update the SEPTA and User location
     update_task_handle: Option<JoinHandle<Result<()>>>,
-
-    /// We provide more information to the render based on what state we are in
-    supplement_transit_info: Arc<Mutex<Option<SupplementalTransitInfo>>>,
 }
 
 impl TransitTracker {
-    const SEPTA_IMAGE_BIG: &[u8] = include_bytes!("../../assets/SEPTA.bmp");
-
     async fn get_location(
         home_assistant_client: &home_assistant_rest::Client,
-        config: &TransitConfig,
+        config: &TransitTrackerConfig,
     ) -> Result<(Option<String>, Option<String>, f64, f64)> {
         let entity_state = home_assistant_client
             .get_states_of_entity(&config.person_entity_id)
@@ -503,7 +526,7 @@ impl TransitTracker {
         }
     }
 
-    pub fn new(config: TransitConfig) -> Result<Self> {
+    pub fn new(config: TransitTrackerConfig) -> Result<Self> {
         let septa_client = septa_api::Client::new();
         let home_assistant_client = home_assistant_rest::Client::new(
             &config.home_assistant_url,
@@ -511,12 +534,10 @@ impl TransitTracker {
         )?;
 
         let state_holder = Arc::new(Mutex::new(StateHolder::new()));
-        let supplement_transit_info = Arc::new(Mutex::new(None));
         let cancel_token = CancellationToken::new();
 
         // Clone the shared data since it will be moved onto the task
         let task_state_holder = state_holder.clone();
-        let task_supplement_transit_info = supplement_transit_info.clone();
         let task_cancel_token = cancel_token.clone();
 
         let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
@@ -531,56 +552,17 @@ impl TransitTracker {
 
                 match (user_location_result, trains_result) {
                     (Ok((person_name, person_state, user_loc_lat, user_loc_lon)), Ok(trains)) => {
-                        let mut simple_state: Option<SimpleTransitState>;
+                        let mut holder_unlocked = task_state_holder.lock();
 
-                        {
-                            let mut holder_unlocked = task_state_holder.lock();
+                        let transit_state = std::mem::take(&mut holder_unlocked.transit_state);
+                        let new_state =
+                            transit_state.update_state((user_loc_lat, user_loc_lon), trains)?;
 
-                            let transit_state = std::mem::take(&mut holder_unlocked.transit_state);
-                            let new_state =
-                                transit_state.update_state((user_loc_lat, user_loc_lon), trains)?;
+                        debug!("Updated state: {:?}", new_state);
 
-                            simple_state = Some((&holder_unlocked.transit_state).into());
-
-                            let _ =
-                                std::mem::replace(&mut holder_unlocked.transit_state, new_state);
-                            holder_unlocked.person_name = person_name;
-                            holder_unlocked.person_state = person_state;
-                        } // drop(holder_unlocked)
-
-                        // Provide supplemental information
-                        match simple_state.take() {
-                            Some(state) => match state {
-                                SimpleTransitState::NoStatus => {
-                                    *task_supplement_transit_info.lock() = None;
-                                }
-                                SimpleTransitState::AtStation(stop) => {
-                                    match septa_client
-                                        .arrivals(septa_api::requests::ArrivalsRequest {
-                                            station: stop,
-                                            results: Some(1),
-                                            direction: None,
-                                        })
-                                        .await
-                                    {
-                                        Ok(arrivals) => {
-                                            *task_supplement_transit_info.lock() =
-                                                Some(SupplementalTransitInfo::AtStation(
-                                                    arrivals.northbound.get(0).cloned(),
-                                                    arrivals.southbound.get(0).cloned(),
-                                                ));
-                                        }
-                                        Err(e) => {
-                                            error!("Error occurred while getting arrival data: {e}")
-                                        }
-                                    }
-                                }
-                                SimpleTransitState::OnTrain(_) => {
-                                    *task_supplement_transit_info.lock() = None;
-                                }
-                            },
-                            None => error!("Simple state was not updated!"),
-                        }
+                        let _ = std::mem::replace(&mut holder_unlocked.transit_state, new_state);
+                        holder_unlocked.person_name = person_name;
+                        holder_unlocked.person_state = person_state;
                     }
                     (Err(location_error), Err(train_error)) => {
                         error!("Error in both location and SEPTA calls (location_error: {location_error}, train_error: {train_error})");
@@ -606,14 +588,38 @@ impl TransitTracker {
             state: state_holder,
             cancel_token,
             update_task_handle: Some(update_task_handle),
-            supplement_transit_info,
         })
     }
 }
 
+type NoStatusViews<'a, C> = chain! {
+    Text<'a, MonoTextStyle<'static, C>>,
+    Text<'a, MonoTextStyle<'static, C>>
+};
+
+type AtStationViews<'a, C> = chain! {
+    Text<'a, MonoTextStyle<'static, C>>,
+    Text<'a, MonoTextStyle<'static, C>>
+};
+
+type OnTrainViews<'a, C> = chain! {
+    Text<'a, MonoTextStyle<'static, C>>,
+    Text<'a, MonoTextStyle<'static, C>>
+};
+
+#[derive(ViewGroup)]
+enum PersonStatusView<'a, C: PixelColor> {
+    NoStatus(
+        LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, NoStatusViews<'a, C>>,
+    ),
+    AtStation(
+        LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, AtStationViews<'a, C>>,
+    ),
+    OnTrain(LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, OnTrainViews<'a, C>>),
+}
+
 impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTracker {
     fn render(&self, canvas: &mut D) -> Result<()> {
-        trace!("Render called");
         let state_unlocked = self.state.lock();
 
         // Attempt to figure out the name of the person
@@ -623,57 +629,71 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
         };
 
         // Attempt to figure out the transit state
-        let status_text = match &state_unlocked.transit_state {
-            TransitState::NoStatus(_) => {
-                if let Some(state) = &state_unlocked.person_state {
-                    state.to_owned()
+        let status_view = match &state_unlocked.transit_state {
+            TransitState::NoStatus { .. } => {
+                let state = if let Some(state) = &state_unlocked.person_state {
+                    state
                 } else {
-                    "Unknown".to_owned()
-                }
+                    "Unknown"
+                };
+
+                let chain = Chain::new(Text::new(
+                    name,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ))
+                .append(Text::new(
+                    state,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ));
+
+                PersonStatusView::NoStatus(
+                    LinearLayout::horizontal(chain)
+                        .with_alignment(vertical::Center)
+                        .with_spacing(spacing::FixedMargin(6))
+                        .arrange(),
+                )
             }
-            TransitState::AtStation(tracker) => {
-                format!("At Station {}", tracker.station)
+            TransitState::AtStation { .. } => {
+                let chain = Chain::new(Text::new(
+                    name,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ))
+                .append(Text::new(
+                    "TODO",
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ));
+
+                PersonStatusView::AtStation(
+                    LinearLayout::horizontal(chain)
+                        .with_alignment(vertical::Center)
+                        .with_spacing(spacing::FixedMargin(6))
+                        .arrange(),
+                )
             }
-            TransitState::OnTrain(tracker) => format!("On Train {}", tracker.train_id),
+            TransitState::OnTrain { train_id, .. } => {
+                let chain = Chain::new(Text::new(
+                    name,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ))
+                .append(Text::new(
+                    train_id.as_str(),
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ));
+
+                PersonStatusView::OnTrain(
+                    LinearLayout::horizontal(chain)
+                        .with_alignment(vertical::Center)
+                        .with_spacing(spacing::FixedMargin(6))
+                        .arrange(),
+                )
+            }
         };
-
-        let supplement_transit_info_unlocked = self.supplement_transit_info.lock();
-
-        let mut northbound_status = None;
-
-        if let Some(info) = &*supplement_transit_info_unlocked {
-            match info {
-                SupplementalTransitInfo::AtStation(northbound, _) => {
-                    if let Some(northbound) = northbound {
-                        northbound_status = Some((
-                            format!("Train {}", northbound.train_id),
-                            format!("Status: {}", northbound.status),
-                        ));
-                    }
-                }
-            }
-        }
-
-        let mut supplemental_views = Vec::new();
-
-        if let Some(north) = &northbound_status {
-            supplemental_views.push(Text::new(
-                &north.0,
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
-            ));
-            supplemental_views.push(Text::new(
-                &north.1,
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::RED),
-            ));
-        } else {
-            supplemental_views.push(Text::new(
-                "No Trains",
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
-            ));
-        }
 
         LinearLayout::vertical(
             Chain::new(Text::new(
@@ -681,32 +701,19 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
                 Point::zero(),
                 MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
             ))
-            .append(Text::new(
-                status_text.as_str(),
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
-            ))
-            .append(
-                LinearLayout::horizontal(Views::new(supplemental_views.as_mut_slice())).arrange(),
-            ),
+            .append(status_view),
         )
         .with_alignment(horizontal::Left)
         .arrange()
         .draw(canvas)
         .unwrap();
 
-        Image::new(
-            &Bmp::<Rgb888>::from_slice(Self::SEPTA_IMAGE_BIG).unwrap(),
-            Point::new(40, 20),
-        )
-        .draw(canvas)?;
-
         Ok(())
     }
 }
 
 impl Configurable for TransitTracker {
-    type Config = TransitConfig;
+    type Config = TransitTrackerConfig;
 
     fn config_name() -> &'static str {
         "transit_tracker"

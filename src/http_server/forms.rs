@@ -1,6 +1,6 @@
 use crate::{
     config::{self},
-    renders::transit_tracker::TransitConfig,
+    renders::transit_tracker::TransitTrackerConfig,
 };
 use embedded_graphics::mono_font;
 use rocket::{FromForm, FromFormField};
@@ -219,7 +219,7 @@ pub(crate) struct TransitConfigForm<'a> {
     pub(crate) person_entity_id: &'a str,
 }
 
-impl<'a> From<&TransitConfigForm<'a>> for TransitConfig {
+impl<'a> From<&TransitConfigForm<'a>> for TransitTrackerConfig {
     fn from(form: &TransitConfigForm<'a>) -> Self {
         Self {
             home_assistant_url: form.home_assistant_url.to_string(),

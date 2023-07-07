@@ -27,6 +27,7 @@ use std::{
     time::{Duration, Instant},
 };
 use strum::IntoEnumIterator;
+use tinybmp::Bmp;
 use tokio::{join, select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
@@ -54,6 +55,12 @@ const ON_TRAIN_TO_NO_STATUS_TIMEOUT: Duration = Duration::from_secs(300);
 lazy_static! {
     static ref ON_TRAIN_ENTER_RADIUS: Distance = Distance::from_meters(400.0);
     static ref ON_TRAIN_REMAIN_RADIUS: Distance = Distance::from_meters(400.0);
+}
+
+const SEPTA_IMAGE_16: &[u8] = include_bytes!("../../assets/SEPTA_16.bmp");
+lazy_static! {
+    static ref SEPTA_BMP_16: Bmp::<'static, Rgb888> =
+        Bmp::<Rgb888>::from_slice(SEPTA_IMAGE_16).unwrap();
 }
 
 #[derive(Debug, Default, Clone)]
@@ -84,9 +91,6 @@ enum TransitState {
         time_outside_station: Option<Instant>,
     },
     OnTrain {
-        /// The unique train id.
-        train_id: String,
-
         /// The train (wrap in Box to get rid of the clippy::large_enum_variant lint warning)
         train: Box<Train>,
 
@@ -318,7 +322,6 @@ impl TransitState {
                                 train.train_number
                             );
                             TransitState::OnTrain {
-                                train_id: train.train_number.clone(),
                                 train: Box::new(train),
                                 last_train_encounter: now,
                             }
@@ -332,14 +335,14 @@ impl TransitState {
                 }
             }
             TransitState::OnTrain {
-                train_id,
+                train,
                 mut last_train_encounter,
                 ..
             } => {
                 // See if we are still in the radius of the train
                 let current_train = trains
                     .into_iter()
-                    .find(|train| train.train_number == train_id);
+                    .find(|train_itr| train_itr.train_number == train.train_number);
 
                 match current_train {
                     Some(train) => {
@@ -350,7 +353,6 @@ impl TransitState {
                         {
                             last_train_encounter = now;
                             TransitState::OnTrain {
-                                train_id,
                                 train: Box::new(train),
                                 last_train_encounter,
                             }
@@ -378,7 +380,7 @@ impl TransitState {
                                 Some(station) => {
                                     debug!(
                                         "Transitioning from OnTrain to AtStation (station: {}, train: {})",
-                                        station.to_string(), train_id
+                                        station.to_string(), train.train_number
                                     );
                                     TransitState::AtStation {
                                         station,
@@ -389,14 +391,13 @@ impl TransitState {
                                 None => {
                                     debug!(
                                         "Transitioning from OnTrain to NoStatus (train: {})",
-                                        train_id
+                                        train.train_number
                                     );
                                     TransitState::default()
                                 }
                             }
                         } else {
                             TransitState::OnTrain {
-                                train_id,
                                 train: Box::new(train),
                                 last_train_encounter,
                             }
@@ -432,10 +433,8 @@ enum TrainStatus {
     Late(i32),
 }
 
-// TODO: Use these in render
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
-enum SimpleTransitState {
+enum DisplayTransitState {
     NoStatus,
     AtStation {
         station_name: String,
@@ -443,11 +442,12 @@ enum SimpleTransitState {
     OnTrain {
         train_number: String,
         status: TrainStatus,
+        status_text: String,
         destination: String,
     },
 }
 
-impl From<&TransitState> for SimpleTransitState {
+impl From<&TransitState> for DisplayTransitState {
     fn from(value: &TransitState) -> Self {
         match value {
             TransitState::NoStatus { .. } => Self::NoStatus,
@@ -460,6 +460,11 @@ impl From<&TransitState> for SimpleTransitState {
                     std::cmp::Ordering::Less => TrainStatus::Early(train.late),
                     std::cmp::Ordering::Equal => TrainStatus::OnTime,
                     std::cmp::Ordering::Greater => TrainStatus::Late(-train.late),
+                },
+                status_text: match train.late.cmp(&0) {
+                    std::cmp::Ordering::Less => format!("{} Mins Early", train.late),
+                    std::cmp::Ordering::Equal => "On Time".to_string(),
+                    std::cmp::Ordering::Greater => format!("{} Mins Late", -train.late),
                 },
                 destination: train.dest.to_string(),
             },
@@ -603,6 +608,8 @@ type AtStationViews<'a, C> = chain! {
 
 type OnTrainViews<'a, C> = chain! {
     Text<'a, MonoTextStyle<'static, C>>,
+    Text<'a, MonoTextStyle<'static, C>>,
+    Text<'a, MonoTextStyle<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>
 };
 
@@ -627,9 +634,11 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
             None => "Unknown",
         };
 
+        let display_state: DisplayTransitState = (&state_unlocked.transit_state).into();
+
         // Attempt to figure out the transit state
-        let status_view = match &state_unlocked.transit_state {
-            TransitState::NoStatus { .. } => {
+        let status_view = match &display_state {
+            DisplayTransitState::NoStatus => {
                 let state = if let Some(state) = &state_unlocked.person_state {
                     state
                 } else {
@@ -654,14 +663,14 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
                         .arrange(),
                 )
             }
-            TransitState::AtStation { .. } => {
+            DisplayTransitState::AtStation { station_name } => {
                 let chain = Chain::new(Text::new(
                     name,
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
                 ))
                 .append(Text::new(
-                    "TODO",
+                    station_name,
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
                 ));
@@ -673,14 +682,34 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
                         .arrange(),
                 )
             }
-            TransitState::OnTrain { train_id, .. } => {
+            DisplayTransitState::OnTrain {
+                train_number,
+                status,
+                status_text,
+                destination,
+            } => {
+                let status_color = match status {
+                    TrainStatus::Early(_) | TrainStatus::OnTime => Rgb888::GREEN,
+                    TrainStatus::Late(_) => Rgb888::RED,
+                };
+
                 let chain = Chain::new(Text::new(
                     name,
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
                 ))
                 .append(Text::new(
-                    train_id.as_str(),
+                    train_number,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ))
+                .append(Text::new(
+                    status_text,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, status_color),
+                ))
+                .append(Text::new(
+                    destination,
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
                 ));
@@ -695,11 +724,16 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
         };
 
         LinearLayout::vertical(
-            Chain::new(Text::new(
-                name,
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
-            ))
+            Chain::new(
+                LinearLayout::horizontal(Chain::new(Text::new(
+                    "Person Tracker",
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
+                )))
+                .with_alignment(vertical::Center)
+                .with_spacing(spacing::FixedMargin(6))
+                .arrange(),
+            )
             .append(status_view),
         )
         .with_alignment(horizontal::Left)

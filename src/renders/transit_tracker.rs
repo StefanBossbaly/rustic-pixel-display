@@ -66,7 +66,6 @@ struct TrainEncounter {
 }
 
 #[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
 enum TransitState {
     NoStatus {
         /// A map of the regional rail stop to the time the user entered into the radius of the station.
@@ -88,8 +87,8 @@ enum TransitState {
         /// The unique train id.
         train_id: String,
 
-        /// The train
-        train: Train,
+        /// The train (wrap in Box to get rid of the clippy::large_enum_variant lint warning)
+        train: Box<Train>,
 
         /// The time the user has been on the train.
         last_train_encounter: Instant,
@@ -320,7 +319,7 @@ impl TransitState {
                             );
                             TransitState::OnTrain {
                                 train_id: train.train_number.clone(),
-                                train,
+                                train: Box::new(train),
                                 last_train_encounter: now,
                             }
                         }
@@ -352,7 +351,7 @@ impl TransitState {
                             last_train_encounter = now;
                             TransitState::OnTrain {
                                 train_id,
-                                train,
+                                train: Box::new(train),
                                 last_train_encounter,
                             }
                         } else if last_train_encounter - now > ON_TRAIN_TO_NO_STATUS_TIMEOUT {
@@ -398,7 +397,7 @@ impl TransitState {
                         } else {
                             TransitState::OnTrain {
                                 train_id,
-                                train,
+                                train: Box::new(train),
                                 last_train_encounter,
                             }
                         }

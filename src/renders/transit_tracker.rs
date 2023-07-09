@@ -1,8 +1,9 @@
 use crate::render::{Configurable, Render};
 use anyhow::{anyhow, Result};
 use embedded_graphics::{
+    image::Image,
     mono_font::{self, MonoTextStyle},
-    pixelcolor::Rgb888,
+    pixelcolor::{Rgb555, Rgb565, Rgb888},
     prelude::{DrawTarget, PixelColor, Point, RgbColor},
     text::Text,
     Drawable,
@@ -57,12 +58,12 @@ lazy_static! {
     static ref ON_TRAIN_REMAIN_RADIUS: Distance = Distance::from_meters(400.0);
 }
 
-const SEPTA_IMAGE_16: &[u8] = include_bytes!("../../assets/SEPTA_16.bmp");
+const SEPTA_IMAGE: &[u8] = include_bytes!("../../assets/SEPTA_16.bmp");
+const HOME_ICON: &[u8] = include_bytes!("../../assets/home.bmp");
 lazy_static! {
-    static ref SEPTA_BMP_16: Bmp::<'static, Rgb888> =
-        Bmp::<Rgb888>::from_slice(SEPTA_IMAGE_16).unwrap();
+    static ref SEPTA_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(SEPTA_IMAGE).unwrap();
+    static ref HOME_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(HOME_ICON).unwrap();
 }
-
 #[derive(Debug, Default, Clone)]
 struct TrainEncounter {
     /// The first time the user encountered the train inside the radius of the current station.
@@ -411,6 +412,7 @@ impl TransitState {
 }
 
 struct StateHolder {
+    /// The current state of the person
     transit_state: TransitState,
     person_name: Option<String>,
     person_state: Option<String>,
@@ -475,6 +477,7 @@ impl From<&TransitState> for DisplayTransitState {
 pub struct TransitTracker {
     state: Arc<Mutex<StateHolder>>,
 
+    /// Used to signal that all async tasks should be cancelled immediately
     cancel_token: CancellationToken,
 
     /// Handle to the task used to update the SEPTA and User location
@@ -545,7 +548,7 @@ impl TransitTracker {
         let task_cancel_token = cancel_token.clone();
 
         let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
-            loop {
+            'update_loop: loop {
                 let refresh_time = tokio::time::Instant::now() + Duration::from_secs(15);
 
                 let trains_request = septa_client.train_view();
@@ -585,7 +588,7 @@ impl TransitTracker {
 
                 select! {
                     _ = tokio::time::sleep_until(refresh_time) => {},
-                    _ = task_cancel_token.cancelled() => break,
+                    _ = task_cancel_token.cancelled() => break 'update_loop,
                 }
             }
 
@@ -601,24 +604,22 @@ impl TransitTracker {
 }
 
 type NoStatusViews<'a, C> = chain! {
-    Text<'a, MonoTextStyle<'static, C>>,
+    Image<'a, Bmp<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>
 };
 
 type AtStationViews<'a, C> = chain! {
-    Text<'a, MonoTextStyle<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>
 };
 
 type OnTrainViews<'a, C> = chain! {
     Text<'a, MonoTextStyle<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>,
-    Text<'a, MonoTextStyle<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>
 };
 
 #[derive(ViewGroup)]
-enum PersonStatusView<'a, C: PixelColor> {
+enum PersonStatusView<'a, C: PixelColor + From<Rgb555> + From<Rgb565> + From<Rgb888>> {
     NoStatus(
         LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, NoStatusViews<'a, C>>,
     ),
@@ -649,15 +650,10 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
                     "Unknown"
                 };
 
-                let chain = Chain::new(Text::new(
-                    name,
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
-                ))
-                .append(Text::new(
+                let chain = Chain::new(Image::new(&*HOME_BMP, Point::zero())).append(Text::new(
                     state,
                     Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
                 ));
 
                 PersonStatusView::NoStatus(
@@ -669,14 +665,9 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
             }
             DisplayTransitState::AtStation { station_name } => {
                 let chain = Chain::new(Text::new(
-                    name,
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
-                ))
-                .append(Text::new(
                     station_name,
                     Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
                 ));
 
                 PersonStatusView::AtStation(
@@ -698,24 +689,19 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
                 };
 
                 let chain = Chain::new(Text::new(
-                    name,
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
-                ))
-                .append(Text::new(
                     train_number,
                     Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
                 ))
                 .append(Text::new(
                     status_text,
                     Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, status_color),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, status_color),
                 ))
                 .append(Text::new(
                     destination,
                     Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
                 ));
 
                 PersonStatusView::OnTrain(
@@ -730,17 +716,17 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
         LinearLayout::vertical(
             Chain::new(
                 LinearLayout::horizontal(Chain::new(Text::new(
-                    "Person Tracker",
+                    name,
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
                 )))
                 .with_alignment(vertical::Center)
-                .with_spacing(spacing::FixedMargin(6))
                 .arrange(),
             )
             .append(status_view),
         )
         .with_alignment(horizontal::Left)
+        .with_spacing(spacing::FixedMargin(4))
         .arrange()
         .draw(canvas)
         .unwrap();

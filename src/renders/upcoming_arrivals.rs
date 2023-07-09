@@ -17,7 +17,7 @@ use embedded_layout::{
 };
 use embedded_layout::{layout::linear::spacing, prelude::Link};
 use embedded_layout_macros::ViewGroup;
-use log::error;
+use log::{error, trace};
 use parking_lot::Mutex;
 use septa_api::{requests::ArrivalsRequest, responses::Arrivals, types::RegionalRailStop};
 use serde::Deserialize;
@@ -45,8 +45,11 @@ pub struct UpcomingArrivals {
 }
 
 const SEPTA_IMAGE: &[u8] = include_bytes!("../../assets/SEPTA_16.bmp");
+const HOME_ICON: &[u8] = include_bytes!("../../assets/home.bmp");
+
 lazy_static! {
     static ref SEPTA_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(SEPTA_IMAGE).unwrap();
+    static ref HOME_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(HOME_ICON).unwrap();
 }
 
 impl UpcomingArrivals {
@@ -73,9 +76,10 @@ impl UpcomingArrivals {
                     .await
                 {
                     Ok(response) => {
-                        println!(
+                        trace!(
                             "northbound: {:?}, southbound: {:?}",
-                            response.northbound, response.southbound
+                            response.northbound,
+                            response.southbound
                         );
 
                         // Sort the arrivals

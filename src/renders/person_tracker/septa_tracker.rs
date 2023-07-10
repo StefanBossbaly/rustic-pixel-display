@@ -1,7 +1,6 @@
 use crate::render::{Configurable, Render};
 use anyhow::{anyhow, Result};
 use embedded_graphics::{
-    image::Image,
     mono_font::{self, MonoTextStyle},
     pixelcolor::{Rgb555, Rgb565, Rgb888},
     prelude::{DrawTarget, PixelColor, Point, RgbColor},
@@ -16,8 +15,7 @@ use embedded_layout::{
 };
 use embedded_layout_macros::ViewGroup;
 use geoutils::{Distance, Location};
-use home_assistant_rest::get::StateEnum;
-use log::{debug, error, warn};
+use log::{debug, error};
 use parking_lot::Mutex;
 use septa_api::{responses::Train, types::RegionalRailStop};
 use serde::Deserialize;
@@ -31,6 +29,8 @@ use strum::IntoEnumIterator;
 use tinybmp::Bmp;
 use tokio::{join, select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
+
+use super::{StateProvider, Usefulness};
 
 /// The amount of time the user has to be within the radius of a station to be considered at the station.
 const NO_STATUS_TO_AT_STATION: Duration = Duration::from_secs(30);
@@ -58,12 +58,12 @@ lazy_static! {
     static ref ON_TRAIN_REMAIN_RADIUS: Distance = Distance::from_meters(400.0);
 }
 
-const SEPTA_IMAGE: &[u8] = include_bytes!("../../assets/SEPTA_16.bmp");
-const HOME_ICON: &[u8] = include_bytes!("../../assets/home.bmp");
+const SEPTA_IMAGE: &[u8] = include_bytes!("../../../assets/SEPTA_16.bmp");
+
 lazy_static! {
     static ref SEPTA_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(SEPTA_IMAGE).unwrap();
-    static ref HOME_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(HOME_ICON).unwrap();
 }
+
 #[derive(Debug, Default, Clone)]
 struct TrainEncounter {
     /// The first time the user encountered the train inside the radius of the current station.
@@ -411,32 +411,15 @@ impl TransitState {
     }
 }
 
-struct StateHolder {
-    /// The current state of the person
-    transit_state: TransitState,
-    person_name: Option<String>,
-    person_state: Option<String>,
-}
-
-impl StateHolder {
-    fn new() -> Self {
-        Self {
-            transit_state: TransitState::new(),
-            person_name: None,
-            person_state: None,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
-enum TrainStatus {
+pub enum TrainStatus {
     Early(i32),
     OnTime,
     Late(i32),
 }
 
 #[derive(Clone, Debug)]
-enum DisplayTransitState {
+pub enum DisplayTransitState {
     NoStatus,
     AtStation {
         station_name: String,
@@ -447,6 +430,16 @@ enum DisplayTransitState {
         status_text: String,
         destination: String,
     },
+}
+
+impl Usefulness for DisplayTransitState {
+    fn usefulness(&self) -> super::UsefulnessVal {
+        match self {
+            DisplayTransitState::NoStatus => super::UsefulnessVal::NotUseful,
+            DisplayTransitState::AtStation { .. } => super::UsefulnessVal::VeryUseful,
+            DisplayTransitState::OnTrain { .. } => super::UsefulnessVal::VeryUseful,
+        }
+    }
 }
 
 impl From<&TransitState> for DisplayTransitState {
@@ -475,7 +468,7 @@ impl From<&TransitState> for DisplayTransitState {
 }
 
 pub struct TransitTracker {
-    state: Arc<Mutex<StateHolder>>,
+    state: Arc<Mutex<TransitState>>,
 
     /// Used to signal that all async tasks should be cancelled immediately
     cancel_token: CancellationToken,
@@ -488,43 +481,17 @@ impl TransitTracker {
     async fn get_location(
         home_assistant_client: &home_assistant_rest::Client,
         config: &TransitTrackerConfig,
-    ) -> Result<(Option<String>, Option<String>, f64, f64)> {
+    ) -> Result<(f64, f64)> {
         let entity_state = home_assistant_client
             .get_states_of_entity(&config.person_entity_id)
             .await?;
-
-        // Attempt to get the person's name
-        let person_name = if let Some(state_value) = entity_state.attributes.get("friendly_name") {
-            if let Some(value) = state_value.as_str() {
-                Some(value.to_owned())
-            } else {
-                warn!("Could not parse 'friendly_name' as str");
-                None
-            }
-        } else {
-            warn!("Could find 'friendly_name' in attributes");
-            None
-        };
-
-        // Attempt to get the person's state
-        let person_state = if let Some(state_value) = entity_state.state {
-            if let StateEnum::String(value) = state_value {
-                Some(value)
-            } else {
-                warn!("Could not parse 'state' as str");
-                None
-            }
-        } else {
-            warn!("{}'s 'state' was not provided", config.person_entity_id);
-            None
-        };
 
         if let (Some(lat), Some(lon)) = (
             entity_state.attributes.get("latitude"),
             entity_state.attributes.get("longitude"),
         ) {
             if let (Some(lat_f64), Some(lon_f64)) = (lat.as_f64(), lon.as_f64()) {
-                Ok((person_name, person_state, lat_f64, lon_f64))
+                Ok((lat_f64, lon_f64))
             } else {
                 Err(anyhow!("Could not match lat lng"))
             }
@@ -540,7 +507,7 @@ impl TransitTracker {
             &config.home_assistant_bearer_token,
         )?;
 
-        let state_holder = Arc::new(Mutex::new(StateHolder::new()));
+        let state_holder = Arc::new(Mutex::new(TransitState::new()));
         let cancel_token = CancellationToken::new();
 
         // Clone the shared data since it will be moved onto the task
@@ -558,28 +525,22 @@ impl TransitTracker {
                     join!(trains_request, user_location_request);
 
                 match (user_location_result, trains_result) {
-                    (Ok((person_name, person_state, user_loc_lat, user_loc_lon)), Ok(trains)) => {
+                    (Ok((user_loc_lat, user_loc_lon)), Ok(trains)) => {
                         let mut holder_unlocked = task_state_holder.lock();
 
-                        let transit_state = std::mem::take(&mut holder_unlocked.transit_state);
+                        let transit_state = std::mem::take(&mut *holder_unlocked);
                         let new_state =
                             transit_state.update_state((user_loc_lat, user_loc_lon), trains)?;
 
                         debug!("Updated state: {:?}", new_state);
 
-                        let _ = std::mem::replace(&mut holder_unlocked.transit_state, new_state);
-                        holder_unlocked.person_name = person_name;
-                        holder_unlocked.person_state = person_state;
+                        let _ = std::mem::replace(&mut *holder_unlocked, new_state);
                     }
                     (Err(location_error), Err(train_error)) => {
                         error!("Error in both location and SEPTA calls (location_error: {location_error}, train_error: {train_error})");
                     }
-                    (Ok((person_name, person_state, ..)), Err(train_error)) => {
+                    (Ok(_), Err(train_error)) => {
                         error!("Error in SEPTA call ({train_error})");
-
-                        let mut holder_unlocked = task_state_holder.lock();
-                        holder_unlocked.person_name = person_name;
-                        holder_unlocked.person_state = person_state;
                     }
                     (Err(location_error), Ok(_)) => {
                         error!("Error in location call ({location_error})");
@@ -603,8 +564,15 @@ impl TransitTracker {
     }
 }
 
+impl StateProvider for TransitTracker {
+    type State = DisplayTransitState;
+
+    fn provide_state(&self) -> Self::State {
+        (&*self.state.lock()).into()
+    }
+}
+
 type NoStatusViews<'a, C> = chain! {
-    Image<'a, Bmp<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>
 };
 
@@ -629,29 +597,13 @@ enum PersonStatusView<'a, C: PixelColor + From<Rgb555> + From<Rgb565> + From<Rgb
     OnTrain(LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, OnTrainViews<'a, C>>),
 }
 
-impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTracker {
+impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for DisplayTransitState {
     fn render(&self, canvas: &mut D) -> Result<()> {
-        let state_unlocked = self.state.lock();
-
-        // Attempt to figure out the name of the person
-        let name = match &state_unlocked.person_name {
-            Some(name) => name,
-            None => "Unknown",
-        };
-
-        let display_state: DisplayTransitState = (&state_unlocked.transit_state).into();
-
         // Attempt to figure out the transit state
-        let status_view = match &display_state {
+        let status_view = match self {
             DisplayTransitState::NoStatus => {
-                let state = if let Some(state) = &state_unlocked.person_state {
-                    state
-                } else {
-                    "Unknown"
-                };
-
-                let chain = Chain::new(Image::new(&*HOME_BMP, Point::zero())).append(Text::new(
-                    state,
+                let chain = Chain::new(Text::new(
+                    "No Status",
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
                 ));
@@ -713,23 +665,12 @@ impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for TransitTra
             }
         };
 
-        LinearLayout::vertical(
-            Chain::new(
-                LinearLayout::horizontal(Chain::new(Text::new(
-                    name,
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
-                )))
-                .with_alignment(vertical::Center)
-                .arrange(),
-            )
-            .append(status_view),
-        )
-        .with_alignment(horizontal::Left)
-        .with_spacing(spacing::FixedMargin(4))
-        .arrange()
-        .draw(canvas)
-        .unwrap();
+        LinearLayout::vertical(Chain::new(status_view))
+            .with_alignment(horizontal::Left)
+            .with_spacing(spacing::FixedMargin(4))
+            .arrange()
+            .draw(canvas)
+            .unwrap();
 
         Ok(())
     }

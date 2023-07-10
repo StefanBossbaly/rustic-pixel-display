@@ -45,11 +45,9 @@ pub struct UpcomingArrivals {
 }
 
 const SEPTA_IMAGE: &[u8] = include_bytes!("../../assets/SEPTA_16.bmp");
-const HOME_ICON: &[u8] = include_bytes!("../../assets/home.bmp");
 
 lazy_static! {
     static ref SEPTA_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(SEPTA_IMAGE).unwrap();
-    static ref HOME_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(HOME_ICON).unwrap();
 }
 
 impl UpcomingArrivals {

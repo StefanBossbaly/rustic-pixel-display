@@ -1,3 +1,6 @@
+// TODO: Remove when more mature
+#![allow(dead_code)]
+
 #[macro_use]
 extern crate lazy_static;
 

@@ -1,2 +1,2 @@
-pub mod transit_tracker;
+pub mod person_tracker;
 pub mod upcoming_arrivals;

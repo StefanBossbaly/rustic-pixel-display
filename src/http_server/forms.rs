@@ -1,7 +1,4 @@
-use crate::{
-    config::{self},
-    renders::transit_tracker::TransitTrackerConfig,
-};
+use crate::config::{self};
 use embedded_graphics::mono_font;
 use rocket::{FromForm, FromFormField};
 use serde::Serialize;
@@ -219,12 +216,12 @@ pub(crate) struct TransitConfigForm<'a> {
     pub(crate) person_entity_id: &'a str,
 }
 
-impl<'a> From<&TransitConfigForm<'a>> for TransitTrackerConfig {
-    fn from(form: &TransitConfigForm<'a>) -> Self {
-        Self {
-            home_assistant_url: form.home_assistant_url.to_string(),
-            home_assistant_bearer_token: form.home_assistant_bearer_token.to_string(),
-            person_entity_id: form.person_entity_id.to_string(),
-        }
-    }
-}
+// impl<'a> From<&TransitConfigForm<'a>> for TransitTrackerConfig {
+//     fn from(form: &TransitConfigForm<'a>) -> Self {
+//         Self {
+//             home_assistant_url: form.home_assistant_url.to_string(),
+//             home_assistant_bearer_token: form.home_assistant_bearer_token.to_string(),
+//             person_entity_id: form.person_entity_id.to_string(),
+//         }
+//     }
+// }

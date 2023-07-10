@@ -30,7 +30,7 @@ use tinybmp::Bmp;
 use tokio::{join, select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
-use super::{StateProvider, Usefulness};
+use super::{State, StateProvider, Usefulness};
 
 /// The amount of time the user has to be within the radius of a station to be considered at the station.
 const NO_STATUS_TO_AT_STATION: Duration = Duration::from_secs(30);
@@ -442,6 +442,88 @@ impl Usefulness for DisplayTransitState {
     }
 }
 
+impl<D> Render<D> for DisplayTransitState
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    fn render(&self, canvas: &mut D) -> Result<()> {
+        // Attempt to figure out the transit state
+        let status_view = match self {
+            DisplayTransitState::NoStatus => {
+                let chain = Chain::new(Text::new(
+                    "No Status",
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
+                ));
+
+                PersonStatusView::NoStatus(
+                    LinearLayout::horizontal(chain)
+                        .with_alignment(vertical::Center)
+                        .with_spacing(spacing::FixedMargin(6))
+                        .arrange(),
+                )
+            }
+            DisplayTransitState::AtStation { station_name } => {
+                let chain = Chain::new(Text::new(
+                    station_name,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
+                ));
+
+                PersonStatusView::AtStation(
+                    LinearLayout::horizontal(chain)
+                        .with_alignment(vertical::Center)
+                        .with_spacing(spacing::FixedMargin(6))
+                        .arrange(),
+                )
+            }
+            DisplayTransitState::OnTrain {
+                train_number,
+                status,
+                status_text,
+                destination,
+            } => {
+                let status_color = match status {
+                    TrainStatus::Early(_) | TrainStatus::OnTime => Rgb888::GREEN,
+                    TrainStatus::Late(_) => Rgb888::RED,
+                };
+
+                let chain = Chain::new(Text::new(
+                    train_number,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
+                ))
+                .append(Text::new(
+                    status_text,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, status_color),
+                ))
+                .append(Text::new(
+                    destination,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
+                ));
+
+                PersonStatusView::OnTrain(
+                    LinearLayout::horizontal(chain)
+                        .with_alignment(vertical::Center)
+                        .with_spacing(spacing::FixedMargin(6))
+                        .arrange(),
+                )
+            }
+        };
+
+        LinearLayout::vertical(Chain::new(status_view))
+            .with_alignment(horizontal::Left)
+            .with_spacing(spacing::FixedMargin(4))
+            .arrange()
+            .draw(canvas)
+            .unwrap();
+
+        Ok(())
+    }
+}
+
 impl From<&TransitState> for DisplayTransitState {
     fn from(value: &TransitState) -> Self {
         match value {
@@ -564,11 +646,14 @@ impl TransitTracker {
     }
 }
 
-impl StateProvider for TransitTracker {
-    type State = DisplayTransitState;
-
-    fn provide_state(&self) -> Self::State {
-        (&*self.state.lock()).into()
+impl<D> StateProvider<D> for TransitTracker
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    fn provide_state(&self) -> Box<dyn super::State<D>> {
+        let display_state: DisplayTransitState = (&*self.state.lock()).into();
+        let state: Box<dyn State<D>> = Box::new(display_state);
+        state
     }
 }
 
@@ -595,85 +680,6 @@ enum PersonStatusView<'a, C: PixelColor + From<Rgb555> + From<Rgb565> + From<Rgb
         LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, AtStationViews<'a, C>>,
     ),
     OnTrain(LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, OnTrainViews<'a, C>>),
-}
-
-impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for DisplayTransitState {
-    fn render(&self, canvas: &mut D) -> Result<()> {
-        // Attempt to figure out the transit state
-        let status_view = match self {
-            DisplayTransitState::NoStatus => {
-                let chain = Chain::new(Text::new(
-                    "No Status",
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
-                ));
-
-                PersonStatusView::NoStatus(
-                    LinearLayout::horizontal(chain)
-                        .with_alignment(vertical::Center)
-                        .with_spacing(spacing::FixedMargin(6))
-                        .arrange(),
-                )
-            }
-            DisplayTransitState::AtStation { station_name } => {
-                let chain = Chain::new(Text::new(
-                    station_name,
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
-                ));
-
-                PersonStatusView::AtStation(
-                    LinearLayout::horizontal(chain)
-                        .with_alignment(vertical::Center)
-                        .with_spacing(spacing::FixedMargin(6))
-                        .arrange(),
-                )
-            }
-            DisplayTransitState::OnTrain {
-                train_number,
-                status,
-                status_text,
-                destination,
-            } => {
-                let status_color = match status {
-                    TrainStatus::Early(_) | TrainStatus::OnTime => Rgb888::GREEN,
-                    TrainStatus::Late(_) => Rgb888::RED,
-                };
-
-                let chain = Chain::new(Text::new(
-                    train_number,
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
-                ))
-                .append(Text::new(
-                    status_text,
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, status_color),
-                ))
-                .append(Text::new(
-                    destination,
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
-                ));
-
-                PersonStatusView::OnTrain(
-                    LinearLayout::horizontal(chain)
-                        .with_alignment(vertical::Center)
-                        .with_spacing(spacing::FixedMargin(6))
-                        .arrange(),
-                )
-            }
-        };
-
-        LinearLayout::vertical(Chain::new(status_view))
-            .with_alignment(horizontal::Left)
-            .with_spacing(spacing::FixedMargin(4))
-            .arrange()
-            .draw(canvas)
-            .unwrap();
-
-        Ok(())
-    }
 }
 
 impl Configurable for TransitTracker {

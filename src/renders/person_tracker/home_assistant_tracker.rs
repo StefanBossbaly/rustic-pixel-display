@@ -1,4 +1,4 @@
-use super::{StateProvider, Usefulness, UsefulnessVal};
+use super::{State, StateProvider, Usefulness, UsefulnessVal};
 use crate::render::Render;
 use anyhow::Result;
 use embedded_graphics::{
@@ -45,7 +45,10 @@ impl Usefulness for PersonState {
     }
 }
 
-impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for PersonState {
+impl<D> Render<D> for PersonState
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
     fn render(&self, canvas: &mut D) -> Result<()> {
         let state_str = match self {
             PersonState::Home => "At Home",
@@ -150,11 +153,13 @@ impl HomeAssistantTracker {
     }
 }
 
-impl StateProvider for HomeAssistantTracker {
-    type State = PersonState;
-
-    fn provide_state(&self) -> Self::State {
-        *self.state.lock()
+impl<D> StateProvider<D> for HomeAssistantTracker
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    fn provide_state(&self) -> Box<dyn super::State<D>> {
+        let state: Box<dyn State<_>> = Box::new(*self.state.lock());
+        state
     }
 }
 

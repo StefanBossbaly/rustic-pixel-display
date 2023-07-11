@@ -1,5 +1,5 @@
-use super::{State, StateProvider, Usefulness, UsefulnessVal};
-use crate::render::Render;
+use super::{State, StateProvider, SubRender, Usefulness, UsefulnessVal};
+use crate::render::SubCanvas;
 use anyhow::Result;
 use embedded_graphics::{
     mono_font::{self, MonoTextStyle},
@@ -16,7 +16,7 @@ use home_assistant_rest::get::StateEnum;
 use log::warn;
 use parking_lot::Mutex;
 use serde::Deserialize;
-use std::{convert::Infallible, sync::Arc, time::Duration};
+use std::{borrow::BorrowMut, convert::Infallible, sync::Arc, time::Duration};
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
@@ -45,17 +45,19 @@ impl Usefulness for PersonState {
     }
 }
 
-impl<D> Render<D> for PersonState
+impl<D> SubRender<D> for PersonState
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    fn render(&self, canvas: &mut D) -> Result<()> {
+    fn sub_render(&self, sub_canvas: &mut SubCanvas<&mut D>) -> Result<()> {
         let state_str = match self {
             PersonState::Home => "At Home",
             PersonState::Away => "Away",
             PersonState::Work => "At Work",
             PersonState::Unknown => "Unknown",
         };
+
+        let canvas = sub_canvas.borrow_mut();
 
         LinearLayout::vertical(Chain::new(Text::new(
             state_str,

@@ -28,7 +28,7 @@ impl<D> OriginDimensions for SubCanvas<D> {
     }
 }
 
-impl<D, C> DrawTarget for SubCanvas<D>
+impl<D, C> DrawTarget for SubCanvas<&mut D>
 where
     C: PixelColor,
     D: DrawTarget<Color = C, Error = core::convert::Infallible>,

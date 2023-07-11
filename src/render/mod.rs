@@ -7,7 +7,10 @@ mod sub_canvas;
 
 pub use sub_canvas::SubCanvas;
 
-pub trait Render<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
+pub trait Render<D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
     fn render(&self, canvas: &mut D) -> Result<()>;
 }
 

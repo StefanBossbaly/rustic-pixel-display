@@ -1,4 +1,4 @@
-use crate::render::{Configurable, Render};
+use crate::render::{Configurable, SubCanvas};
 use anyhow::{anyhow, Result};
 use embedded_graphics::{
     mono_font::{self, MonoTextStyle},
@@ -20,6 +20,7 @@ use parking_lot::Mutex;
 use septa_api::{responses::Train, types::RegionalRailStop};
 use serde::Deserialize;
 use std::{
+    borrow::BorrowMut,
     collections::HashMap,
     convert::Infallible,
     sync::Arc,
@@ -30,7 +31,7 @@ use tinybmp::Bmp;
 use tokio::{join, select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
-use super::{State, StateProvider, Usefulness};
+use super::{State, StateProvider, SubRender, Usefulness};
 
 /// The amount of time the user has to be within the radius of a station to be considered at the station.
 const NO_STATUS_TO_AT_STATION: Duration = Duration::from_secs(30);
@@ -442,11 +443,11 @@ impl Usefulness for DisplayTransitState {
     }
 }
 
-impl<D> Render<D> for DisplayTransitState
+impl<D> SubRender<D> for DisplayTransitState
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    fn render(&self, canvas: &mut D) -> Result<()> {
+    fn sub_render(&self, sub_canvas: &mut SubCanvas<&mut D>) -> Result<()> {
         // Attempt to figure out the transit state
         let status_view = match self {
             DisplayTransitState::NoStatus => {
@@ -512,6 +513,8 @@ where
                 )
             }
         };
+
+        let canvas = sub_canvas.borrow_mut();
 
         LinearLayout::vertical(Chain::new(status_view))
             .with_alignment(horizontal::Left)

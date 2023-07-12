@@ -9,7 +9,7 @@ use embedded_graphics::{
 };
 use embedded_layout::{
     layout::linear::{spacing, LinearLayout},
-    prelude::{horizontal, Chain},
+    prelude::{vertical, Chain},
     View,
 };
 use log::warn;
@@ -103,12 +103,12 @@ where
 
         match most_useful_render {
             Some(most_useful) => {
-                let person_layout = LinearLayout::vertical(Chain::new(Text::new(
+                let person_layout = LinearLayout::horizontal(Chain::new(Text::new(
                     "Stefan Bossbaly",
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
                 )))
-                .with_alignment(horizontal::Center)
+                .with_alignment(vertical::Center)
                 .with_spacing(spacing::FixedMargin(6))
                 .arrange();
 

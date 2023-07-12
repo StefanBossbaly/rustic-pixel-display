@@ -2,6 +2,7 @@ use super::{State, StateProvider, SubRender, Usefulness, UsefulnessVal};
 use crate::render::SubCanvas;
 use anyhow::Result;
 use embedded_graphics::{
+    image::Image,
     mono_font::{self, MonoTextStyle},
     pixelcolor::Rgb888,
     prelude::{DrawTarget, Point, RgbColor},
@@ -10,15 +11,30 @@ use embedded_graphics::{
 };
 use embedded_layout::{
     layout::linear::{spacing, LinearLayout},
-    prelude::{horizontal, Chain},
+    prelude::{vertical, Chain},
 };
 use home_assistant_rest::get::StateEnum;
 use log::warn;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use std::{borrow::BorrowMut, convert::Infallible, sync::Arc, time::Duration};
+use tinybmp::Bmp;
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
+
+const HOME_BYTES: &[u8] = include_bytes!("icons/home_48.bmp");
+const LOCATION_AWAY_BYTES: &[u8] = include_bytes!("icons/location_away_48.bmp");
+const UNKNOWN_BYTES: &[u8] = include_bytes!("icons/unknown_48.bmp");
+const WORK_BYTES: &[u8] = include_bytes!("icons/work_48.bmp");
+
+lazy_static! {
+    static ref HOME_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(HOME_BYTES).unwrap();
+    static ref LOCATION_AWAY_BMP: Bmp::<'static, Rgb888> =
+        Bmp::<Rgb888>::from_slice(LOCATION_AWAY_BYTES).unwrap();
+    static ref UNKNOWN_BMP: Bmp::<'static, Rgb888> =
+        Bmp::<Rgb888>::from_slice(UNKNOWN_BYTES).unwrap();
+    static ref WORK_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(WORK_BYTES).unwrap();
+}
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct HomeTrackerConfig {
@@ -50,21 +66,23 @@ where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
     fn sub_render(&self, sub_canvas: &mut SubCanvas<&mut D>) -> Result<()> {
-        let state_str = match self {
-            PersonState::Home => "At Home",
-            PersonState::Away => "Away",
-            PersonState::Work => "At Work",
-            PersonState::Unknown => "Unknown",
+        let (state_str, state_icon) = match self {
+            PersonState::Home => ("At Home", *HOME_BMP),
+            PersonState::Away => ("Away", *LOCATION_AWAY_BMP),
+            PersonState::Work => ("At Work", *WORK_BMP),
+            PersonState::Unknown => ("Unknown", *UNKNOWN_BMP),
         };
 
         let canvas = sub_canvas.borrow_mut();
 
-        LinearLayout::vertical(Chain::new(Text::new(
-            state_str,
-            Point::zero(),
-            MonoTextStyle::new(&mono_font::ascii::FONT_6X10, Rgb888::WHITE),
-        )))
-        .with_alignment(horizontal::Left)
+        LinearLayout::horizontal(Chain::new(Image::new(&state_icon, Point::zero())).append(
+            Text::new(
+                state_str,
+                Point::zero(),
+                MonoTextStyle::new(&mono_font::ascii::FONT_10X20, Rgb888::WHITE),
+            ),
+        ))
+        .with_alignment(vertical::Center)
         .with_spacing(spacing::FixedMargin(4))
         .arrange()
         .draw(canvas)

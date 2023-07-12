@@ -2,6 +2,7 @@ use anyhow::Result;
 use embedded_graphics::{
     prelude::{DrawTarget, OriginDimensions, PixelColor, Point, Size},
     primitives::Rectangle,
+    transform::Transform,
     Pixel,
 };
 use std::cell::RefCell;
@@ -56,22 +57,14 @@ where
         I: IntoIterator<Item = Self::Color>,
     {
         let mut canvas = self.canvas.borrow_mut();
-        let translated_area = Rectangle {
-            top_left: area.top_left + self.offset,
-            size: self.size,
-        };
 
-        canvas.fill_contiguous(&translated_area, colors)
+        canvas.fill_contiguous(&area.translate(self.offset), colors)
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
         let mut canvas = self.canvas.borrow_mut();
-        let translated_area = Rectangle {
-            top_left: area.top_left + self.offset,
-            size: self.size,
-        };
 
-        canvas.fill_solid(&translated_area, color)
+        canvas.fill_solid(&area.translate(self.offset), color)
     }
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {

@@ -13,7 +13,7 @@ use embedded_layout::{
     View,
 };
 use log::warn;
-use std::{cell::RefCell, convert::Infallible};
+use std::convert::Infallible;
 
 mod home_assistant_tracker;
 mod septa_tracker;
@@ -39,7 +39,7 @@ pub trait SubRender<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    fn sub_render(&self, canvas: &mut SubCanvas<&mut D>) -> Result<()>;
+    fn sub_render(&self, canvas: &mut SubCanvas<D>) -> Result<()>;
 }
 
 pub trait State<D>: Usefulness + SubRender<D>
@@ -123,7 +123,7 @@ where
                         y: person_bounds.size.height as i32,
                     },
                     canvas_bounds.size - person_bounds.size,
-                    RefCell::new(canvas),
+                    canvas,
                 );
 
                 most_useful.sub_render(&mut sub_canvas).unwrap();

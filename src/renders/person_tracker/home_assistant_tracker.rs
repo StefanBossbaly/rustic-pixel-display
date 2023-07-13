@@ -65,7 +65,7 @@ impl<D> SubRender<D> for PersonState
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    fn sub_render(&self, sub_canvas: &mut SubCanvas<&mut D>) -> Result<()> {
+    fn sub_render(&self, sub_canvas: &mut SubCanvas<D>) -> Result<()> {
         let (state_str, state_icon) = match self {
             PersonState::Home => ("At Home", *HOME_BMP),
             PersonState::Away => ("Away", *LOCATION_AWAY_BMP),
@@ -136,7 +136,7 @@ impl HomeAssistantTracker {
                             Some(state) => match state.to_ascii_lowercase().as_str() {
                                 "home" => PersonState::Home,
                                 "work" => PersonState::Work,
-                                "away" => PersonState::Away,
+                                "away" | "not_home" => PersonState::Away,
                                 _ => PersonState::Unknown,
                             },
                             None => PersonState::Unknown,

@@ -446,7 +446,7 @@ impl<D> SubRender<D> for DisplayTransitState
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    fn sub_render(&self, sub_canvas: &mut SubCanvas<&mut D>) -> Result<()> {
+    fn sub_render(&self, sub_canvas: &mut SubCanvas<D>) -> Result<()> {
         // Attempt to figure out the transit state
         let status_view = match self {
             DisplayTransitState::NoStatus => {

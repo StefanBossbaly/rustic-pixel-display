@@ -20,7 +20,6 @@ use parking_lot::Mutex;
 use septa_api::{responses::Train, types::RegionalRailStop};
 use serde::Deserialize;
 use std::{
-    borrow::BorrowMut,
     collections::HashMap,
     convert::Infallible,
     sync::Arc,
@@ -514,13 +513,11 @@ where
             }
         };
 
-        let canvas = sub_canvas.borrow_mut();
-
         LinearLayout::vertical(Chain::new(status_view))
             .with_alignment(horizontal::Left)
             .with_spacing(spacing::FixedMargin(4))
             .arrange()
-            .draw(canvas)
+            .draw(sub_canvas)
             .unwrap();
 
         Ok(())

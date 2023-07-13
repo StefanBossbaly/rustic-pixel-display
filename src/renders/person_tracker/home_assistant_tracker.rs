@@ -17,7 +17,7 @@ use home_assistant_rest::get::StateEnum;
 use log::warn;
 use parking_lot::Mutex;
 use serde::Deserialize;
-use std::{borrow::BorrowMut, convert::Infallible, sync::Arc, time::Duration};
+use std::{convert::Infallible, sync::Arc, time::Duration};
 use tinybmp::Bmp;
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
@@ -55,8 +55,8 @@ impl Usefulness for PersonState {
     fn usefulness(&self) -> UsefulnessVal {
         match self {
             PersonState::Home | PersonState::Work => UsefulnessVal::SomewhatUseful,
-            PersonState::Away => UsefulnessVal::BarelyUseful,
-            PersonState::Unknown => UsefulnessVal::NotUseful,
+            PersonState::Away => UsefulnessVal::SomewhatUseful,
+            PersonState::Unknown => UsefulnessVal::BarelyUseful,
         }
     }
 }
@@ -73,8 +73,6 @@ where
             PersonState::Unknown => ("Unknown", *UNKNOWN_BMP),
         };
 
-        let canvas = sub_canvas.borrow_mut();
-
         LinearLayout::horizontal(Chain::new(Image::new(&state_icon, Point::zero())).append(
             Text::new(
                 state_str,
@@ -85,7 +83,7 @@ where
         .with_alignment(vertical::Center)
         .with_spacing(spacing::FixedMargin(4))
         .arrange()
-        .draw(canvas)
+        .draw(sub_canvas)
         .unwrap();
 
         Ok(())

@@ -136,7 +136,10 @@ enum LayoutView<'a, C: PixelColor> {
     ),
 }
 
-impl<D: DrawTarget<Color = Rgb888, Error = Infallible>> Render<D> for UpcomingArrivals {
+impl<D> Render<D> for UpcomingArrivals
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
     fn render(&self, canvas: &mut D) -> Result<()> {
         let station_name = self.station.to_string();
         let state_unlocked = self.state.lock();

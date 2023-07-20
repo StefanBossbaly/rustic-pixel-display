@@ -1,4 +1,3 @@
-use crate::render::{Render, SubCanvas};
 use anyhow::Result;
 use embedded_graphics::{
     mono_font::{self, MonoTextStyle},
@@ -13,6 +12,7 @@ use embedded_layout::{
     View,
 };
 use log::warn;
+use rustic_pixel_display::render::{Render, SubCanvas};
 use std::{collections::HashMap, convert::Infallible};
 
 mod home_assistant_tracker;

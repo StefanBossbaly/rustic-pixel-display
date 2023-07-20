@@ -1,4 +1,3 @@
-use crate::render::{Configurable, Render};
 use anyhow::Result;
 use embedded_graphics::{
     image::Image,
@@ -19,6 +18,7 @@ use embedded_layout::{layout::linear::spacing, prelude::Link};
 use embedded_layout_macros::ViewGroup;
 use log::{error, trace};
 use parking_lot::Mutex;
+use rustic_pixel_display::render::{Configurable, Render};
 use septa_api::{requests::ArrivalsRequest, responses::Arrivals, types::RegionalRailStop};
 use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc, time::Duration};

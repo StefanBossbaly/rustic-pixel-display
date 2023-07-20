@@ -13,13 +13,12 @@ use embedded_layout::{
 };
 use log::error;
 use parking_lot::Mutex;
+use rustic_pixel_display::render::Render;
 use serde::Deserialize;
 use std::{convert::Infallible, net::IpAddr, sync::Arc, time::Duration};
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use weer_api::{chrono::Utc, BaseApi, Client};
-
-use crate::render::Render;
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum Location {
@@ -41,7 +40,6 @@ impl From<Location> for weer_api::Query {
 #[derive(Debug, Default)]
 struct DisplayForecast {
     location_name: String,
-    region_name: String,
     temperature: f32,
     temperature_str: String,
     feels_like: f32,
@@ -54,7 +52,6 @@ impl From<weer_api::Forecast> for DisplayForecast {
     fn from(value: weer_api::Forecast) -> Self {
         Self {
             location_name: value.location.name.clone(),
-            region_name: value.location.region.clone(),
             temperature: value.current.temp_f,
             temperature_str: format!("{} °F", value.current.temp_f),
             feels_like: value.current.feelslike_f,

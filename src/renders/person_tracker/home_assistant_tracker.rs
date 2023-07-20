@@ -1,5 +1,4 @@
 use super::{State, StateProvider, SubRender, Usefulness, UsefulnessVal};
-use crate::render::SubCanvas;
 use anyhow::Result;
 use embedded_graphics::{
     image::Image,
@@ -16,6 +15,7 @@ use embedded_layout::{
 use home_assistant_rest::get::StateEnum;
 use log::warn;
 use parking_lot::Mutex;
+use rustic_pixel_display::render::SubCanvas;
 use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc, time::Duration};
 use tinybmp::Bmp;

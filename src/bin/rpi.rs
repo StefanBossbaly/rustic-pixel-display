@@ -1,5 +1,6 @@
 use anyhow::Result;
-use rustic_pixel_display::{renders::upcoming_arrivals::UpcomingArrivals, rpi};
+use rustic_pixel_display::rpi;
+use rustic_pixel_examples::renders::upcoming_arrivals::UpcomingArrivals;
 
 #[cfg(feature = "http_server")]
 use rustic_pixel_display::http_server;

@@ -1,4 +1,3 @@
-use crate::render::{Configurable, SubCanvas};
 use anyhow::{anyhow, Result};
 use embedded_graphics::{
     mono_font::{self, MonoTextStyle},
@@ -17,6 +16,7 @@ use embedded_layout_macros::ViewGroup;
 use geoutils::{Distance, Location};
 use log::{debug, error};
 use parking_lot::Mutex;
+use rustic_pixel_display::render::{Configurable, SubCanvas};
 use septa_api::{responses::Train, types::RegionalRailStop};
 use serde::Deserialize;
 use std::{

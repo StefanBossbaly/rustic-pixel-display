@@ -8,12 +8,10 @@ use embedded_graphics_simulator::{
     OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
 use lazy_static::lazy_static;
-use rustic_pixel_display::{
-    render::Render,
-    renders::person_tracker::{
-        HomeAssistantTracker, HomeTrackerConfig, PersonTracker, StateProvider, TransitTracker,
-        TransitTrackerConfig,
-    },
+use rustic_pixel_display::render::Render;
+use rustic_pixel_examples::renders::person_tracker::{
+    HomeAssistantTracker, HomeTrackerConfig, PersonTracker, StateProvider, TransitTracker,
+    TransitTrackerConfig,
 };
 use std::{collections::HashMap, env::var, vec};
 

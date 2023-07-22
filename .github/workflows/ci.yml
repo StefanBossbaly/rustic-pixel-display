@@ -57,4 +57,4 @@ jobs:
 
       - name: Build
         run: |
-          cargo build ---manifest-path rustic-pixel-display/Cargo.toml -release --no-default-features ${{ matrix.features }}
+          cargo build --manifest-path rustic-pixel-display/Cargo.toml --release --no-default-features ${{ matrix.features }}

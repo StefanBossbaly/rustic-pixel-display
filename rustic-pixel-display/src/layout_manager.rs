@@ -34,7 +34,7 @@ where
 {
     size: Size,
     offset: Point,
-    render: Box<dyn for<'a> Render<SubCanvas<'a, D>>>,
+    render: SubRender<D>,
 }
 
 pub struct LayoutManager<D>
@@ -58,63 +58,63 @@ where
         common_layout: CommonLayout<D>,
         canvas_size: Size,
     ) -> LayoutManager<D> {
-        let mut layouts = Vec::new();
-
-        match common_layout {
+        let layouts = match common_layout {
             CommonLayout::Single(render) => {
-                layouts.push(Layout {
+                vec![Layout {
                     size: canvas_size,
                     offset: Point::zero(),
                     render,
-                });
+                }]
             }
             CommonLayout::SplitWidth { left, right } => {
                 let split_width = canvas_size.width / 2;
 
-                layouts.push(Layout {
-                    size: Size {
-                        width: split_width,
-                        ..canvas_size
+                vec![
+                    Layout {
+                        size: Size {
+                            width: split_width,
+                            ..canvas_size
+                        },
+                        offset: Point::zero(),
+                        render: left,
                     },
-                    offset: Point::zero(),
-                    render: left,
-                });
-
-                layouts.push(Layout {
-                    size: Size {
-                        width: split_width,
-                        ..canvas_size
+                    Layout {
+                        size: Size {
+                            width: split_width,
+                            ..canvas_size
+                        },
+                        offset: Point {
+                            x: split_width as i32,
+                            y: 0,
+                        },
+                        render: right,
                     },
-                    offset: Point {
-                        x: 0,
-                        y: split_width as i32,
-                    },
-                    render: right,
-                });
+                ]
             }
             CommonLayout::SplitHeight { top, bottom } => {
                 let split_height = canvas_size.height / 2;
 
-                layouts.push(Layout {
-                    size: Size {
-                        height: split_height,
-                        ..canvas_size
+                vec![
+                    Layout {
+                        size: Size {
+                            height: split_height,
+                            ..canvas_size
+                        },
+                        offset: Point::zero(),
+                        render: top,
                     },
-                    offset: Point::zero(),
-                    render: top,
-                });
-
-                layouts.push(Layout {
-                    size: Size {
-                        height: split_height,
-                        ..canvas_size
+                    Layout {
+                        size: Size {
+                            height: split_height,
+                            ..canvas_size
+                        },
+                        offset: Point {
+                            x: 0,
+                            y: split_height as i32,
+                        },
+                        render: bottom,
                     },
-                    offset: Point {
-                        x: split_height as i32,
-                        y: 0,
-                    },
-                    render: bottom,
-                });
+                ]
             }
             CommonLayout::Split4 {
                 top_left,
@@ -125,62 +125,56 @@ where
                 let split_width = canvas_size.width / 2;
                 let split_height = canvas_size.height / 2;
 
-                layouts.push(Layout {
-                    size: Size {
-                        width: split_width,
-                        height: split_height,
+                vec![
+                    Layout {
+                        size: Size {
+                            width: split_width,
+                            height: split_height,
+                        },
+                        offset: Point::zero(),
+                        render: top_left,
                     },
-                    offset: Point::zero(),
-                    render: top_left,
-                });
-
-                layouts.push(Layout {
-                    size: Size {
-                        width: split_width,
-                        height: split_height,
+                    Layout {
+                        size: Size {
+                            width: split_width,
+                            height: split_height,
+                        },
+                        offset: Point {
+                            x: 0,
+                            y: split_width as i32,
+                        },
+                        render: top_right,
                     },
-                    offset: Point {
-                        x: split_width as i32,
-                        y: 0,
+                    Layout {
+                        size: Size {
+                            width: split_width,
+                            height: split_height,
+                        },
+                        offset: Point {
+                            x: split_height as i32,
+                            y: 0,
+                        },
+                        render: bottom_left,
                     },
-                    render: top_right,
-                });
-
-                layouts.push(Layout {
-                    size: Size {
-                        width: split_width,
-                        height: split_height,
+                    Layout {
+                        size: Size {
+                            width: split_width,
+                            height: split_height,
+                        },
+                        offset: Point {
+                            x: split_height as i32,
+                            y: split_width as i32,
+                        },
+                        render: bottom_right,
                     },
-                    offset: Point {
-                        x: 0,
-                        y: split_height as i32,
-                    },
-                    render: bottom_left,
-                });
-
-                layouts.push(Layout {
-                    size: Size {
-                        width: split_width,
-                        height: split_height,
-                    },
-                    offset: Point {
-                        x: split_width as i32,
-                        y: split_height as i32,
-                    },
-                    render: bottom_right,
-                });
+                ]
             }
-        }
+        };
 
         Self { layouts }
     }
 
-    pub fn add_render(
-        &mut self,
-        canvas_size: Size,
-        canvas_offset: Point,
-        render: Box<dyn for<'a> Render<SubCanvas<'a, D>>>,
-    ) {
+    pub fn add_render(&mut self, canvas_size: Size, canvas_offset: Point, render: SubRender<D>) {
         self.layouts.push(Layout {
             size: canvas_size,
             offset: canvas_offset,

@@ -5,5 +5,6 @@
 pub mod http_server;
 
 pub mod config;
+pub mod layout_manager;
 pub mod render;
 pub mod rpi;

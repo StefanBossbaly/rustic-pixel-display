@@ -5,6 +5,29 @@ use embedded_graphics::{
 };
 use std::convert::Infallible;
 
+type SubRender<D> = Box<dyn for<'a> Render<SubCanvas<'a, D>>>;
+
+pub enum CommonLayout<D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    Single(SubRender<D>),
+    SplitWidth {
+        left: SubRender<D>,
+        right: SubRender<D>,
+    },
+    SplitHeight {
+        top: SubRender<D>,
+        bottom: SubRender<D>,
+    },
+    Split4 {
+        top_left: SubRender<D>,
+        top_right: SubRender<D>,
+        bottom_left: SubRender<D>,
+        bottom_right: SubRender<D>,
+    },
+}
+
 struct Layout<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
@@ -29,6 +52,127 @@ where
         Self {
             layouts: Vec::new(),
         }
+    }
+
+    pub fn from_common_layout(
+        common_layout: CommonLayout<D>,
+        canvas_size: Size,
+    ) -> LayoutManager<D> {
+        let mut layouts = Vec::new();
+
+        match common_layout {
+            CommonLayout::Single(render) => {
+                layouts.push(Layout {
+                    size: canvas_size,
+                    offset: Point::zero(),
+                    render,
+                });
+            }
+            CommonLayout::SplitWidth { left, right } => {
+                let split_width = canvas_size.width / 2;
+
+                layouts.push(Layout {
+                    size: Size {
+                        width: split_width,
+                        ..canvas_size
+                    },
+                    offset: Point::zero(),
+                    render: left,
+                });
+
+                layouts.push(Layout {
+                    size: Size {
+                        width: split_width,
+                        ..canvas_size
+                    },
+                    offset: Point {
+                        x: 0,
+                        y: split_width as i32,
+                    },
+                    render: right,
+                });
+            }
+            CommonLayout::SplitHeight { top, bottom } => {
+                let split_height = canvas_size.height / 2;
+
+                layouts.push(Layout {
+                    size: Size {
+                        height: split_height,
+                        ..canvas_size
+                    },
+                    offset: Point::zero(),
+                    render: top,
+                });
+
+                layouts.push(Layout {
+                    size: Size {
+                        height: split_height,
+                        ..canvas_size
+                    },
+                    offset: Point {
+                        x: split_height as i32,
+                        y: 0,
+                    },
+                    render: bottom,
+                });
+            }
+            CommonLayout::Split4 {
+                top_left,
+                top_right,
+                bottom_left,
+                bottom_right,
+            } => {
+                let split_width = canvas_size.width / 2;
+                let split_height = canvas_size.height / 2;
+
+                layouts.push(Layout {
+                    size: Size {
+                        width: split_width,
+                        height: split_height,
+                    },
+                    offset: Point::zero(),
+                    render: top_left,
+                });
+
+                layouts.push(Layout {
+                    size: Size {
+                        width: split_width,
+                        height: split_height,
+                    },
+                    offset: Point {
+                        x: split_width as i32,
+                        y: 0,
+                    },
+                    render: top_right,
+                });
+
+                layouts.push(Layout {
+                    size: Size {
+                        width: split_width,
+                        height: split_height,
+                    },
+                    offset: Point {
+                        x: 0,
+                        y: split_height as i32,
+                    },
+                    render: bottom_left,
+                });
+
+                layouts.push(Layout {
+                    size: Size {
+                        width: split_width,
+                        height: split_height,
+                    },
+                    offset: Point {
+                        x: split_width as i32,
+                        y: split_height as i32,
+                    },
+                    render: bottom_right,
+                });
+            }
+        }
+
+        Self { layouts }
     }
 
     pub fn add_render(

@@ -1,0 +1,53 @@
+name: Rust CI (lib)
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  test:
+    name: Test
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+        rust:
+          - stable
+        features:
+          - ""
+          #- "--features http_server"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v3
+        with:
+          lfs: "false"
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+          components: rustfmt, clippy
+
+      - name: Display Toolchain Information
+        run: |
+          cargo --version --verbose
+          rustc --version
+          cargo clippy --version
+
+      - name: Lint
+        run: |
+          cargo fmt --manifest-path rustic-pixel-display/Cargo.toml -- --check
+          cargo clippy --manifest-path rustic-pixel-display/Cargo.toml -- -D warnings
+
+      - name: Test
+        run: |
+          cargo check --manifest-path rustic-pixel-display/Cargo.toml --no-default-features ${{ matrix.features }}
+          cargo test --manifest-path rustic-pixel-display/Cargo.toml --all --no-default-features ${{ matrix.features }}
+
+      - name: Build
+        run: |
+          cargo build --manifest-path rustic-pixel-display/Cargo.toml --release --no-default-features ${{ matrix.features }}

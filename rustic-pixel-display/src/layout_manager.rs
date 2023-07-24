@@ -183,6 +183,15 @@ where
     }
 }
 
+impl<D> Default for LayoutManager<D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<D> Render<D> for LayoutManager<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
@@ -196,7 +205,7 @@ where
             } = layout;
 
             render
-                .render(&mut SubCanvas::new(offset.clone(), size.clone(), canvas))
+                .render(&mut SubCanvas::new(*offset, *size, canvas))
                 .unwrap();
         }
 

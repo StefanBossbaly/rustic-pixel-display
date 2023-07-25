@@ -18,7 +18,7 @@ use embedded_layout::{layout::linear::spacing, prelude::Link};
 use embedded_layout_macros::ViewGroup;
 use log::{error, trace};
 use parking_lot::Mutex;
-use rustic_pixel_display::render::{Configurable, Render};
+use rustic_pixel_display::render::{Render, RenderFactory};
 use septa_api::{requests::ArrivalsRequest, responses::Arrivals, types::RegionalRailStop};
 use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc, time::Duration};
@@ -146,6 +146,7 @@ where
 
         let canvas_bounding_box = canvas.bounding_box();
         let mut remaining_height = canvas_bounding_box.size.height;
+        dbg!(remaining_height);
 
         // Generate the title layout
         let title_layout = LinearLayout::horizontal(
@@ -219,6 +220,8 @@ where
                     break;
                 }
 
+                dbg!(remaining_height);
+
                 remaining_height -= chain.bounds().size.height;
 
                 arrival_layouts.push(LayoutView::UpcomingArrival(
@@ -246,21 +249,29 @@ where
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Deserialize, Debug)]
 pub struct UpcomingArrivalsConfig {
     station: RegionalRailStop,
     limit: Option<u8>,
 }
 
-impl Configurable for UpcomingArrivals {
-    type Config = UpcomingArrivalsConfig;
+pub struct UpcomingArrivalsFactor;
 
-    fn config_name() -> &'static str {
-        "upcoming_arrivals"
+impl<D> RenderFactory<D> for UpcomingArrivalsFactor
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    fn render_name(&self) -> &'static str {
+        "UpcomingArrivals"
     }
 
-    fn load_from_config(config: Self::Config) -> Result<Self> {
-        Ok(Self::new(config.station, config.limit.unwrap_or(20)))
+    fn render_description(&self) -> &'static str {
+        "Upcoming train arrivals for SEPTA regional rail"
+    }
+
+    fn load_from_config(&self) -> Result<Box<dyn Render<D>>> {
+        todo!()
     }
 }
 

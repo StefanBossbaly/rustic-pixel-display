@@ -16,7 +16,7 @@ use embedded_layout_macros::ViewGroup;
 use geoutils::{Distance, Location};
 use log::{debug, error};
 use parking_lot::Mutex;
-use rustic_pixel_display::render::{Configurable, SubCanvas};
+use rustic_pixel_display::render::{Render, RenderFactory, SubCanvas};
 use septa_api::{responses::Train, types::RegionalRailStop};
 use serde::Deserialize;
 use std::{
@@ -682,15 +682,22 @@ enum PersonStatusView<'a, C: PixelColor + From<Rgb555> + From<Rgb565> + From<Rgb
     OnTrain(LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, OnTrainViews<'a, C>>),
 }
 
-impl Configurable for TransitTracker {
-    type Config = TransitTrackerConfig;
+pub struct TransitTrackerFactory;
 
-    fn config_name() -> &'static str {
-        "transit_tracker"
+impl<D> RenderFactory<D> for TransitTrackerFactory
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    fn render_name(&self) -> &'static str {
+        "TransitTracker"
     }
 
-    fn load_from_config(config: Self::Config) -> Result<Self> {
-        TransitTracker::new(config)
+    fn render_description(&self) -> &'static str {
+        "Tracks a person based on the SEPTA transit information"
+    }
+
+    fn load_from_config(&self) -> Result<Box<dyn Render<D>>> {
+        todo!()
     }
 }
 

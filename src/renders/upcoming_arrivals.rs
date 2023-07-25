@@ -256,12 +256,14 @@ pub struct UpcomingArrivalsConfig {
     limit: Option<u8>,
 }
 
-pub struct UpcomingArrivalsFactor;
+pub struct UpcomingArrivalsFactory;
 
-impl<D> RenderFactory<D> for UpcomingArrivalsFactor
+impl<D> RenderFactory<D> for UpcomingArrivalsFactory
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
+    type Config = UpcomingArrivalsConfig;
+
     fn render_name(&self) -> &'static str {
         "UpcomingArrivals"
     }
@@ -270,7 +272,7 @@ where
         "Upcoming train arrivals for SEPTA regional rail"
     }
 
-    fn load_from_config(&self) -> Result<Box<dyn Render<D>>> {
+    fn load_from_config(&self, config: Self::Config) -> Result<Box<dyn Render<D>>> {
         todo!()
     }
 }

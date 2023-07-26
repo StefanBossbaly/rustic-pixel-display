@@ -1,7 +1,6 @@
 use anyhow::Result;
 use embedded_graphics::{pixelcolor::Rgb888, prelude::DrawTarget};
-use serde::de::DeserializeOwned;
-use std::convert::Infallible;
+use std::{convert::Infallible, io::Read};
 
 mod sub_canvas;
 
@@ -18,11 +17,9 @@ pub trait RenderFactory<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    type Config: DeserializeOwned;
-
     fn render_name(&self) -> &'static str;
 
     fn render_description(&self) -> &'static str;
 
-    fn load_from_config(&self, config: Self::Config) -> Result<Box<dyn Render<D>>>;
+    fn load_from_config<R: Read>(&self, reader: R) -> Result<Box<dyn Render<D>>>;
 }

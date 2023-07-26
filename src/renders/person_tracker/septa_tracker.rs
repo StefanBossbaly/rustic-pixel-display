@@ -22,6 +22,7 @@ use serde::Deserialize;
 use std::{
     collections::HashMap,
     convert::Infallible,
+    io::Read,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -688,8 +689,6 @@ impl<D> RenderFactory<D> for TransitTrackerFactory
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    type Config = TransitTrackerConfig;
-
     fn render_name(&self) -> &'static str {
         "TransitTracker"
     }
@@ -698,7 +697,7 @@ where
         "Tracks a person based on the SEPTA transit information"
     }
 
-    fn load_from_config(&self, config: Self::Config) -> Result<Box<dyn Render<D>>> {
+    fn load_from_config<R: Read>(&self, _reader: R) -> Result<Box<dyn Render<D>>> {
         todo!()
     }
 }

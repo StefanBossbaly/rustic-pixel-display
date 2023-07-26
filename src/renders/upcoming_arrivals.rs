@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use rustic_pixel_display::render::{Render, RenderFactory};
 use septa_api::{requests::ArrivalsRequest, responses::Arrivals, types::RegionalRailStop};
 use serde::Deserialize;
-use std::{convert::Infallible, sync::Arc, time::Duration};
+use std::{convert::Infallible, io::Read, sync::Arc, time::Duration};
 use tinybmp::Bmp;
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
@@ -262,8 +262,6 @@ impl<D> RenderFactory<D> for UpcomingArrivalsFactory
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    type Config = UpcomingArrivalsConfig;
-
     fn render_name(&self) -> &'static str {
         "UpcomingArrivals"
     }
@@ -272,7 +270,7 @@ where
         "Upcoming train arrivals for SEPTA regional rail"
     }
 
-    fn load_from_config(&self, config: Self::Config) -> Result<Box<dyn Render<D>>> {
+    fn load_from_config<R: Read>(&self, _reader: R) -> Result<Box<dyn Render<D>>> {
         todo!()
     }
 }

@@ -15,6 +15,11 @@ license = "GPL"
 default = []
 http_server = ["dep:rocket", "dep:rocket_dyn_templates"]
 
+[workspace]
+members = [
+  "macros",
+]
+
 [dependencies]
 embedded-graphics = "0.8.0"
 rocket = { version = "=0.5.0-rc.3", features = ["json"], optional = true }
@@ -27,6 +32,7 @@ anyhow = "1.0.71"
 log = "0.4.19"
 rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", features = ["drawing", "embedded-graphics"] }
 parking_lot = "0.12.1"
+rustic_pixel_display_macros = { path = "macros" }
 
 [lib]
 name = "rustic_pixel_display"

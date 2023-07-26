@@ -1,0 +1,18 @@
+[package]
+name = "rustic_pixel_display_macros"
+version = "0.1.0"
+edition = "2021"
+description = "Macros for rustic_pixel_display"
+keywords = ["rgb", "matrix", "pixel", "display"]
+readme = "README.md"
+repository = "https://github.com/StefanBossbaly/rustic-pixel-display"
+authors = ["Stefan Bossbaly <sbossb@gmail.com>"]
+license = "GPL"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2.0"
+quote = "1.0"
+proc-macro2 = "1.0"

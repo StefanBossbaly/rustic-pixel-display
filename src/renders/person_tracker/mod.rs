@@ -19,7 +19,7 @@ mod home_assistant_tracker;
 mod septa_tracker;
 
 pub use home_assistant_tracker::{HomeAssistantTracker, HomeTrackerConfig};
-pub use septa_tracker::{TransitTracker, TransitTrackerConfig};
+pub use septa_tracker::{TransitTracker, TransitTrackerConfig, TransitTrackerFactory};
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum UsefulnessVal {

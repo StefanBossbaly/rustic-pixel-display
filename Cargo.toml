@@ -30,6 +30,7 @@ embedded-graphics-simulator = "0.5.0"
 rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", features = ["drawing", "embedded-graphics"] }
 weer_api = "0.1.1"
 rustic_pixel_display = { path = "rustic-pixel-display" }
+rustic_pixel_display_macros = { path = "rustic-pixel-display/macros" }
 home-assistant-rest = "0.2.0"
 septa-api = { git = "https://github.com/StefanBossbaly/septa-api.git", branch = "master" }
 geoutils = "0.5.1"

@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use rustic_pixel_display::render::{Render, RenderFactory};
 use septa_api::{requests::ArrivalsRequest, responses::Arrivals, types::RegionalRailStop};
 use serde::Deserialize;
-use std::{convert::Infallible, io::Read, sync::Arc, time::Duration};
+use std::{convert::Infallible, io::Read, marker::PhantomData, sync::Arc, time::Duration};
 use tinybmp::Bmp;
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
@@ -256,9 +256,25 @@ pub struct UpcomingArrivalsConfig {
     limit: Option<u8>,
 }
 
-pub struct UpcomingArrivalsFactory;
+pub struct UpcomingArrivalsFactory<D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    _phantom: PhantomData<D>,
+}
 
-impl<D> RenderFactory<D> for UpcomingArrivalsFactory
+impl<D> Default for UpcomingArrivalsFactory<D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    fn default() -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<D> RenderFactory<D> for UpcomingArrivalsFactory<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {

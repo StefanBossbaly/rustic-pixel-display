@@ -2,9 +2,11 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Fields, FieldsUnnamed};
+use syn::{
+    parse_macro_input, Data, DeriveInput, Fields, FieldsUnnamed, GenericParam, TypeParamBound,
+};
 
-#[proc_macro_derive(RenderFactory)]
+#[proc_macro_derive(RenderFactories)]
 pub fn derive_configurable(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
@@ -58,10 +60,33 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
         _ => panic!("derive(RenderFactory) only supports enums"),
     };
 
+    let draw_target_ident = ast
+        .generics
+        .params
+        .iter()
+        .find_map(|param| {
+            if let GenericParam::Type(type_param) = param {
+                type_param.bounds.iter().find_map(|bound| {
+                    if let TypeParamBound::Trait(trait_bound) = bound {
+                        if let Some(last_segment) = trait_bound.path.segments.last() {
+                            if last_segment.ident == "DrawTarget" {
+                                return Some(type_param.ident.clone());
+                            }
+                        }
+                    }
+
+                    None
+                })
+            } else {
+                None
+            }
+        })
+        .expect("Could not draw DrawTarget bound in Enum");
+
     let (impl_generics, type_generics, where_clause) = ast.generics.split_for_impl();
 
     let expanded = quote! {
-        impl #impl_generics RenderFactory<D> for #name #type_generics #where_clause {
+        impl #impl_generics rustic_pixel_display::render::RenderFactory<#draw_target_ident> for #name #type_generics #where_clause {
             fn render_name(&self) -> &'static str {
                 match self {
                     #(#name_variants)*
@@ -74,7 +99,7 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                 }
             }
 
-            fn load_from_config<R: Read>(&self, reader: R) -> Result<Box<dyn Render<D>>> {
+            fn load_from_config<R: std::io::Read>(&self, reader: R) -> anyhow::Result<Box<dyn Render<D>>> {
                 match self {
                     #(#load_variants)*
                 }

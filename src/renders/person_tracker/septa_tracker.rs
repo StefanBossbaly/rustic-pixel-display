@@ -23,6 +23,7 @@ use std::{
     collections::HashMap,
     convert::Infallible,
     io::Read,
+    marker::PhantomData,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -683,9 +684,25 @@ enum PersonStatusView<'a, C: PixelColor + From<Rgb555> + From<Rgb565> + From<Rgb
     OnTrain(LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, OnTrainViews<'a, C>>),
 }
 
-pub struct TransitTrackerFactory;
+pub struct TransitTrackerFactory<D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    _phantom: PhantomData<D>,
+}
 
-impl<D> RenderFactory<D> for TransitTrackerFactory
+impl<D> Default for TransitTrackerFactory<D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    fn default() -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<D> RenderFactory<D> for TransitTrackerFactory<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {

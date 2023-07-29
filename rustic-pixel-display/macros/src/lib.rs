@@ -3,7 +3,7 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    parse_macro_input, Data, DeriveInput, Fields, FieldsUnnamed, GenericParam, TypeParamBound,
+    parse_macro_input, Data, DeriveInput, Fields, FieldsUnnamed, GenericParam, Type, TypeParamBound,
 };
 
 #[proc_macro_derive(RenderFactories)]
@@ -12,11 +12,12 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
 
     let name = &ast.ident;
 
-    let (name_variants, description_variants, load_variants) = match &ast.data {
+    let (name_variants, description_variants, load_variants, factory_defaults) = match &ast.data {
         Data::Enum(enum_data) => {
             let mut enum_name = Vec::new();
             let mut enum_description = Vec::new();
             let mut enum_load_from_config = Vec::new();
+            let mut enum_factory_default = Vec::new();
 
             enum_data.variants.iter().for_each(|variant| {
                 let variant_name = &variant.ident;
@@ -26,6 +27,13 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                         if unnamed.len() != 1 {
                             panic!("derive(RenderFactory) only supports enums");
                         }
+
+                        let factory_type =
+                            if let Type::Path(factory_type) = unnamed.first().unwrap().clone().ty {
+                                factory_type.path.segments.first().unwrap().ident.clone()
+                            } else {
+                                panic!("Factory types must be of type \"Path\"");
+                            };
 
                         let render_name = quote! {
                             Self::#variant_name(__self) => {
@@ -45,9 +53,14 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                             }
                         };
 
+                        let render_factory_default = quote! {
+                            Self::#variant_name(#factory_type::default())
+                        };
+
                         enum_name.push(render_name);
                         enum_description.push(render_description);
                         enum_load_from_config.push(render_load_from_config);
+                        enum_factory_default.push(render_factory_default);
                     }
                     Fields::Named(_) | Fields::Unit => {
                         panic!("derive(RenderFactory) only supports enums");
@@ -55,7 +68,12 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                 }
             });
 
-            (enum_name, enum_description, enum_load_from_config)
+            (
+                enum_name,
+                enum_description,
+                enum_load_from_config,
+                enum_factory_default,
+            )
         }
         _ => panic!("derive(RenderFactory) only supports enums"),
     };
@@ -103,6 +121,12 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                 match self {
                     #(#load_variants)*
                 }
+            }
+        }
+
+        impl #impl_generics #name #type_generics #where_clause {
+            fn factories() -> Vec<Self> {
+                vec![#(#factory_defaults,)*]
             }
         }
     };

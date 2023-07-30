@@ -3,7 +3,7 @@ use anyhow::Result;
 use embedded_graphics::{pixelcolor::Rgb888, prelude::DrawTarget};
 use std::{convert::Infallible, io::Read, marker::PhantomData};
 
-struct FactoryRegistry<F, D>
+pub struct FactoryRegistry<F, D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
     F: RenderFactory<D>,
@@ -38,7 +38,7 @@ where
         None
     }
 
-    fn iter(&self) -> impl Iterator<Item = &F> {
+    pub fn iter(&self) -> impl Iterator<Item = &F> {
         self.factories.iter()
     }
 }

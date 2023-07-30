@@ -1,4 +1,5 @@
 use crate::config::{self};
+use anyhow::Context;
 use embedded_graphics::mono_font;
 use rocket::{FromForm, FromFormField};
 use serde::Serialize;
@@ -58,11 +59,9 @@ pub(crate) struct HardwareConfigForm<'a> {
     pub(crate) led_sequence: &'a str,
 }
 
-impl<'a> TryFrom<&'a config::HardwareConfig> for HardwareConfigForm<'a> {
-    type Error = Box<dyn std::error::Error>;
-
-    fn try_from(config: &'a config::HardwareConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
+impl<'a> From<&'a config::HardwareConfig> for HardwareConfigForm<'a> {
+    fn from(config: &'a config::HardwareConfig) -> Self {
+        Self {
             hardware_mapping: config.hardware_mapping.as_ref(),
             rows: config.rows,
             cols: config.cols,
@@ -88,12 +87,12 @@ impl<'a> TryFrom<&'a config::HardwareConfig> for HardwareConfigForm<'a> {
             },
             row_setter: config.row_setter.as_ref(),
             led_sequence: config.led_sequence.as_ref(),
-        })
+        }
     }
 }
 
 impl<'a> TryFrom<&HardwareConfigForm<'a>> for config::HardwareConfig {
-    type Error = Box<dyn std::error::Error>;
+    type Error = anyhow::Error;
 
     fn try_from(form: &HardwareConfigForm<'a>) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -103,25 +102,46 @@ impl<'a> TryFrom<&HardwareConfigForm<'a>> for config::HardwareConfig {
             refresh_rate: form.refresh_rate,
             pi_chip: match form.pi_chip {
                 "Automatic" => None,
-                _ => Some(config::PiChip::from_str(form.pi_chip)?),
+                _ => Some(config::PiChip::from_str(form.pi_chip).context(format!(
+                    "The value \"{}\" for \"pi_chip\" was not a recognized value",
+                    form.pi_chip
+                ))?),
             },
             pwm_bits: form.pwm_bits,
             pwm_lsb_nanoseconds: form.pwm_lsb_nanoseconds,
             slowdown: Some(form.slowdown),
-            interlaced: form.interlaced == "True",
+            interlaced: form.interlaced.to_ascii_lowercase() == "true",
             dither_bits: form.dither_bits,
             chain_length: form.chain_length,
             parallel: form.parallel,
             panel_type: match form.panel_type {
                 "None" => None,
-                _ => Some(config::PanelType::from_str(form.panel_type)?),
+                _ => Some(
+                    config::PanelType::from_str(form.panel_type).context(format!(
+                        "The value \"{}\" for \"panel_type\" was not a recognized value",
+                        form.panel_type
+                    ))?,
+                ),
             },
             multiplexing: match form.multiplexing {
                 "None" => None,
-                _ => Some(config::MultiplexMapperType::from_str(form.multiplexing)?),
+                _ => Some(
+                    config::MultiplexMapperType::from_str(form.multiplexing).context(format!(
+                        "The value \"{}\" for \"multiplexing\" was not a recognized value",
+                        form.multiplexing
+                    ))?,
+                ),
             },
-            row_setter: config::RowAddressSetterType::from_str(form.row_setter)?,
-            led_sequence: config::LedSequence::from_str(form.led_sequence)?,
+            row_setter: config::RowAddressSetterType::from_str(form.row_setter).context(
+                format!(
+                    "The value \"{}\" for \"row_setter\" was not a recognized value",
+                    form.row_setter
+                ),
+            )?,
+            led_sequence: config::LedSequence::from_str(form.led_sequence).context(format!(
+                "The value \"{}\" for \"led_sequence\" was not a recognized value",
+                form.led_sequence
+            ))?,
         })
     }
 }
@@ -174,7 +194,7 @@ pub(crate) enum Font {
     TenByTwenty,
 }
 
-impl From<Font> for mono_font::MonoFont<'static> {
+impl From<Font> for mono_font::MonoFont<'_> {
     fn from(value: Font) -> Self {
         match value {
             Font::FourBySix => mono_font::ascii::FONT_4X6,
@@ -215,13 +235,3 @@ pub(crate) struct TransitConfigForm<'a> {
     #[field()]
     pub(crate) person_entity_id: &'a str,
 }
-
-// impl<'a> From<&TransitConfigForm<'a>> for TransitTrackerConfig {
-//     fn from(form: &TransitConfigForm<'a>) -> Self {
-//         Self {
-//             home_assistant_url: form.home_assistant_url.to_string(),
-//             home_assistant_bearer_token: form.home_assistant_bearer_token.to_string(),
-//             person_entity_id: form.person_entity_id.to_string(),
-//         }
-//     }
-// }

@@ -146,7 +146,6 @@ where
 
         let canvas_bounding_box = canvas.bounding_box();
         let mut remaining_height = canvas_bounding_box.size.height;
-        dbg!(remaining_height);
 
         // Generate the title layout
         let title_layout = LinearLayout::horizontal(
@@ -219,8 +218,6 @@ where
                 if remaining_height < chain_height {
                     break;
                 }
-
-                dbg!(remaining_height);
 
                 remaining_height -= chain.bounds().size.height;
 

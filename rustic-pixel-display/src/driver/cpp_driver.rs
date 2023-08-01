@@ -43,13 +43,19 @@ impl TryFrom<HardwareConfig> for CombinedConfig {
         let mut runtime_options = LedRuntimeOptions::default();
 
         matrix_options.set_hardware_mapping(match value.hardware_mapping {
-            HardwareMapping::AdafruitHat => "adafruit-hat",
-            HardwareMapping::AdafruitHatPwm => "adafruit-hat-pwm",
-            HardwareMapping::Regular => "regular",
-            HardwareMapping::RegularPi1 => "regular", // TODO: Have to verify
-            HardwareMapping::Classic => "regular",    // TODO: Have to verify
-            HardwareMapping::ClassicPi1 => "regular", // TODO: Have to verify
-        });
+            HardwareMapping::AdafruitHat => Ok("adafruit-hat"),
+            HardwareMapping::AdafruitHatPwm => Ok("adafruit-hat-pwm"),
+            HardwareMapping::Regular => Ok("regular"),
+            HardwareMapping::RegularPi1 => Err(anyhow!(
+                "HardwareMapping::RegularPi1 not supported by C++ driver"
+            )),
+            HardwareMapping::Classic => Err(anyhow!(
+                "HardwareMapping::Classic not supported by C++ driver"
+            )),
+            HardwareMapping::ClassicPi1 => Err(anyhow!(
+                "HardwareMapping::ClassicPi1 not supported by C++ driver"
+            )),
+        }?);
         matrix_options.set_rows(value.rows as u32);
         matrix_options.set_cols(value.cols as u32);
         matrix_options.set_chain_length(value.chain_length as u32);
@@ -104,12 +110,14 @@ impl TryFrom<HardwareConfig> for CombinedConfig {
             Ok(0)
         }?);
         matrix_options.set_row_addr_type(match value.row_setter {
-            RowAddressSetterType::Direct => 0,
-            RowAddressSetterType::ShiftRegister => 1,
-            RowAddressSetterType::DirectABCDLine => 2,
-            RowAddressSetterType::ABCShiftRegister => 4,
-            RowAddressSetterType::SM5266 => panic!("Not Supported!"),
-        });
+            RowAddressSetterType::Direct => Ok(0),
+            RowAddressSetterType::ShiftRegister => Ok(1),
+            RowAddressSetterType::DirectABCDLine => Ok(2),
+            RowAddressSetterType::ABCShiftRegister => Ok(4),
+            RowAddressSetterType::SM5266 => Err(anyhow!(
+                "RowAddressSetterType::SM5266 not supported by C++ driver"
+            )),
+        }?);
         matrix_options.set_limit_refresh(value.refresh_rate as u32);
         matrix_options.set_pwm_dither_bits(value.dither_bits as u32);
         matrix_options.set_panel_type(if let Some(panel_type) = value.panel_type {

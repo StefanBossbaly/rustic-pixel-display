@@ -20,8 +20,10 @@ use std::{
     time::Duration,
 };
 
+mod cpp_driver;
 mod rust_driver;
 
+pub use cpp_driver::CppHardwareDriver;
 pub use rust_driver::RustHardwareDriver;
 
 pub trait HardwareDriver: Sized {

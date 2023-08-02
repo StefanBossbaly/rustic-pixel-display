@@ -34,6 +34,12 @@ rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", featur
 parking_lot = "0.12.1"
 rustic_pixel_display_macros = { path = "macros" }
 
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+rpi-led-matrix = { git = "https://github.com/StefanBossbaly/rust-rpi-rgb-led-matrix.git", branch = "changes-merged", features = ["embeddedgraphics", "c-stubs"] }
+
+[target.'cfg(target_arch = "arm")'.dependencies]
+rpi-led-matrix = { git = "https://github.com/StefanBossbaly/rust-rpi-rgb-led-matrix.git", branch = "changes-merged", features = ["embeddedgraphics"] }
+
 [lib]
 name = "rustic_pixel_display"
 path = "src/lib.rs"

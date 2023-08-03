@@ -34,6 +34,7 @@ rustic_pixel_display_macros = { path = "rustic-pixel-display/macros" }
 home-assistant-rest = "0.2.0"
 septa-api = { git = "https://github.com/StefanBossbaly/septa-api.git", branch = "master" }
 geoutils = "0.5.1"
+clap = { version= "4.3", features = ["derive"] }
 
 [lib]
 name = "rustic_pixel_examples"

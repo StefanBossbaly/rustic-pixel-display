@@ -1,6 +1,7 @@
 use crate::render::{Render, RenderFactory};
 use anyhow::Result;
 use embedded_graphics::{pixelcolor::Rgb888, prelude::DrawTarget};
+use serde::Serialize;
 use std::{convert::Infallible, io::Read, marker::PhantomData};
 
 pub struct FactoryRegistry<F, D>
@@ -40,5 +41,32 @@ where
 
     pub fn iter(&self) -> impl Iterator<Item = &F> {
         self.factories.iter()
+    }
+}
+
+#[derive(Serialize)]
+pub struct FactoryEntry {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Serialize)]
+pub struct FactoryEntries(Vec<FactoryEntry>);
+
+impl<F, D> From<FactoryRegistry<F, D>> for FactoryEntries
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+    F: RenderFactory<D>,
+{
+    fn from(factory_registry: FactoryRegistry<F, D>) -> Self {
+        let factories = factory_registry
+            .iter()
+            .map(|factory| FactoryEntry {
+                name: factory.render_name().to_owned(),
+                description: factory.render_description().to_owned(),
+            })
+            .collect();
+
+        Self(factories)
     }
 }

@@ -1,27 +1,24 @@
-use crate::{config, config::RxEvent, config::TxEvent};
+use crate::{config, config::RxEvent, config::TxEvent, factory_registry::FactoryEntries};
 use log::debug;
 use parking_lot::Mutex;
 use rocket::{
     form::{Context, Contextual, Form},
     fs::{relative, FileServer},
     http::Status,
-    post, Build, Rocket, State,
+    post,
+    serde::json::Json,
+    tokio, State,
 };
 use rocket::{get, routes};
 use rocket_dyn_templates::{context, Template};
 use std::sync::Arc;
+use tokio::{select, task::JoinHandle};
+use tokio_util::sync::CancellationToken;
 
 pub(crate) mod forms;
 
-struct EventStateHolder {
-    driver_sender: std::sync::mpsc::Sender<RxEvent>,
-    current_config: Option<config::HardwareConfig>,
-}
-
-struct EventState(Arc<Mutex<EventStateHolder>>);
-
 #[get("/config")]
-async fn configuration(event_state: &State<EventState>) -> Template {
+async fn configuration(event_state: &State<EventStateHolder>) -> Template {
     // Unlock the bus state and clone the current configuration. We could
     // avoid the clone by holding the lock while we convert but it could
     // possible cause contention issues.
@@ -74,7 +71,7 @@ async fn configuration(event_state: &State<EventState>) -> Template {
 #[post("/config", data = "<form>")]
 async fn submit_configuration<'r>(
     form: Form<Contextual<'r, forms::HardwareConfigForm<'r>>>,
-    event_state: &State<EventState>,
+    bus: &State<BusHolder>,
 ) -> (Status, Template) {
     let template = match form.value {
         Some(ref submission) => {
@@ -83,14 +80,10 @@ async fn submit_configuration<'r>(
             // Broadcast the new configuration to the driver
             let new_config = submission.try_into().expect("Bad conversion");
 
-            {
-                event_state
-                    .0
-                    .lock()
-                    .driver_sender
-                    .send(RxEvent::UpdateMatrixConfig(new_config))
-                    .expect("Could not send value");
-            } //drop(bus_state_unlocked)
+            bus.0
+                .send(RxEvent::UpdateMatrixConfig(new_config))
+                .await
+                .expect("Could not send value");
 
             Template::render("config", &form.context)
         }
@@ -121,38 +114,101 @@ async fn submit_transit_config<'r>(
     (form.context.status(), template)
 }
 
-pub fn build_rocket(
-    event_sender: std::sync::mpsc::Sender<RxEvent>,
-    event_receiver: std::sync::mpsc::Receiver<TxEvent>,
-) -> Rocket<Build> {
-    let event_holder = Arc::new(Mutex::new(EventStateHolder {
-        driver_sender: event_sender,
-        current_config: None,
-    }));
+#[get("/factories")]
+fn factories(factories: &State<FactoryEntries>) -> Json<&FactoryEntries> {
+    Json(factories.inner())
+}
 
-    let event_task_holder = event_holder.clone();
+struct BusHolder(tokio::sync::mpsc::Sender<RxEvent>);
 
-    tokio::spawn(async move {
-        while let Ok(event) = event_receiver.recv() {
-            match event {
-                TxEvent::UpdateMatrixConfig(config) => {
-                    event_task_holder.lock().current_config = Some(config);
+/// Holds the state of items that can be set via the event bus
+struct EventState {
+    current_config: Option<config::HardwareConfig>,
+}
+
+struct EventStateHolder(Arc<Mutex<EventState>>);
+
+/// A HTTP server instance that serves the REST API as well as other debugging pages
+pub struct HttpServer {
+    cancel_token: CancellationToken,
+    http_instance: Option<JoinHandle<()>>,
+    event_receiver_task: Option<JoinHandle<()>>,
+}
+
+impl HttpServer {
+    /// Creates a new instance of the HTTP server
+    ///
+    /// # Arguments
+    /// * `event_sender` - The sender end of a channel that will be used to send commands back to the Render Factory
+    /// * `event_receiver` - The receiver end of a channel that will be used receive commands from the Render Factory
+    /// * `factories` - FactoryEntries from a constructed `FactoryRegistry`
+    pub fn new(
+        event_sender: tokio::sync::mpsc::Sender<RxEvent>,
+        mut event_receiver: tokio::sync::mpsc::Receiver<TxEvent>,
+        factories: FactoryEntries,
+    ) -> Self {
+        let event_holder = Arc::new(Mutex::new(EventState {
+            current_config: None,
+        }));
+
+        let cancel_token = CancellationToken::new();
+
+        // This task will receive events and then update the `EventState`
+        let event_task_holder = event_holder.clone();
+        let event_receiver_task = tokio::task::spawn(async move {
+            while let Some(event) = event_receiver.recv().await {
+                match event {
+                    TxEvent::UpdateMatrixConfig(config) => {
+                        event_task_holder.lock().current_config = Some(config);
+                    }
                 }
             }
-        }
-    });
+        });
 
-    rocket::build()
-        .mount(
-            "/",
-            routes![
-                configuration,
-                submit_configuration,
-                transit_config,
-                submit_transit_config
-            ],
-        )
-        .mount("/", FileServer::from(relative!("/static")))
-        .attach(Template::fairing())
-        .manage(EventState(event_holder))
+        let http_cancel_token = cancel_token.clone();
+        let http_instance = tokio::task::spawn(async move {
+            let http_instance = rocket::build()
+                // .mount(
+                //     "/",
+                //     routes![
+                //         configuration,
+                //         submit_configuration,
+                //         transit_config,
+                //         submit_transit_config
+                //     ],
+                // )
+                .mount("/api", routes![factories])
+                // .mount("/", FileServer::from(relative!("/static")))
+                // .attach(Template::fairing())
+                .manage(BusHolder(event_sender))
+                .manage(EventStateHolder(event_holder))
+                .manage(factories)
+                .launch();
+
+            select! {
+                _ = http_instance => {},
+                _ = http_cancel_token.cancelled() => {}
+            }
+        });
+
+        Self {
+            cancel_token: cancel_token,
+            http_instance: Some(http_instance),
+            event_receiver_task: Some(event_receiver_task),
+        }
+    }
+}
+
+impl Drop for HttpServer {
+    fn drop(&mut self) {
+        self.cancel_token.cancel();
+
+        if let Some(task_handle) = self.http_instance.take() {
+            task_handle.abort();
+        }
+
+        if let Some(task_handle) = self.event_receiver_task.take() {
+            task_handle.abort();
+        }
+    }
 }

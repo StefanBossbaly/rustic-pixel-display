@@ -13,7 +13,10 @@ license = "GPL"
 
 [features]
 default = []
-http_server = ["dep:rocket", "dep:rocket_dyn_templates"]
+http_server = [
+  "dep:rocket",
+  "dep:rocket_dyn_templates",
+]
 
 [workspace]
 members = [
@@ -21,23 +24,34 @@ members = [
 ]
 
 [dependencies]
-embedded-graphics = "0.8.0"
-rocket = { version = "=0.5.0-rc.3", features = ["json"], optional = true }
-rocket_dyn_templates = {version = "=0.1.0-rc.3", features = ["tera"], optional = true }
 serde = { version = "1.0.164", features = ["derive"] }
 serde_yaml = "0.9.22"
 strum = { version = "0.25", features = ["derive"] }
 strum_macros = "0.25"
 anyhow = "1.0.71"
 log = "0.4.19"
-rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", features = ["drawing", "embedded-graphics"] }
 parking_lot = "0.12.1"
 rustic_pixel_display_macros = { path = "macros" }
 
+# Feature http_server dependencies
+rocket = { version = "=0.5.0-rc.3", features = ["json"], optional = true }
+rocket_dyn_templates = {version = "=0.1.0-rc.3", features = ["tera"], optional = true }
+
+# Graphics Libraries
+embedded-graphics = "0.8.0"
+
+# Tokio
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7.8" }
+
+# Rust Driver
+rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", features = ["drawing", "embedded-graphics"] }
+
+# Cpp Driver Bindings (For x86_64 stub implementation, for aarch64 use the real deal)
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 rpi-led-matrix = { git = "https://github.com/StefanBossbaly/rust-rpi-rgb-led-matrix.git", branch = "changes-merged", features = ["embeddedgraphics", "c-stubs"] }
 
-[target.'cfg(target_arch = "arm")'.dependencies]
+[target.'cfg(target_arch = "aarch64")'.dependencies]
 rpi-led-matrix = { git = "https://github.com/StefanBossbaly/rust-rpi-rgb-led-matrix.git", branch = "changes-merged", features = ["embeddedgraphics"] }
 
 [lib]

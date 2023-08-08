@@ -1,9 +1,8 @@
-use crate::{config, config::RxEvent, config::TxEvent, factory_registry::FactoryEntries};
+use crate::{config, config::HardwareConfig, factory_registry::FactoryEntries};
 use log::debug;
 use parking_lot::Mutex;
 use rocket::{
     form::{Context, Contextual, Form},
-    fs::{relative, FileServer},
     http::Status,
     post,
     serde::json::Json,
@@ -12,10 +11,24 @@ use rocket::{
 use rocket::{get, routes};
 use rocket_dyn_templates::{context, Template};
 use std::sync::Arc;
-use tokio::{select, task::JoinHandle};
+use tokio::{
+    select,
+    sync::mpsc::{Receiver, Sender},
+    task::JoinHandle,
+};
 use tokio_util::sync::CancellationToken;
 
 pub(crate) mod forms;
+
+#[derive(Debug, Clone)]
+pub enum RxEvent {
+    UpdateMatrixConfig(HardwareConfig),
+}
+
+#[derive(Debug, Clone)]
+pub enum TxEvent {
+    UpdateMatrixConfig(HardwareConfig),
+}
 
 #[get("/config")]
 async fn configuration(event_state: &State<EventStateHolder>) -> Template {
@@ -114,18 +127,25 @@ async fn submit_transit_config<'r>(
     (form.context.status(), template)
 }
 
+#[get("/current")]
+fn current_config(event_state: &State<EventStateHolder>) -> Json<Option<HardwareConfig>> {
+    Json(event_state.0.lock().current_config.clone())
+}
+
 #[get("/factories")]
 fn factories(factories: &State<FactoryEntries>) -> Json<&FactoryEntries> {
     Json(factories.inner())
 }
 
-struct BusHolder(tokio::sync::mpsc::Sender<RxEvent>);
+/// A holder object that simplifies the signature of HTTP methods
+struct BusHolder(Sender<RxEvent>);
 
 /// Holds the state of items that can be set via the event bus
 struct EventState {
     current_config: Option<config::HardwareConfig>,
 }
 
+/// A holder object that simplifies the signature of HTTP methods
 struct EventStateHolder(Arc<Mutex<EventState>>);
 
 /// A HTTP server instance that serves the REST API as well as other debugging pages
@@ -143,8 +163,8 @@ impl HttpServer {
     /// * `event_receiver` - The receiver end of a channel that will be used receive commands from the Render Factory
     /// * `factories` - FactoryEntries from a constructed `FactoryRegistry`
     pub fn new(
-        event_sender: tokio::sync::mpsc::Sender<RxEvent>,
-        mut event_receiver: tokio::sync::mpsc::Receiver<TxEvent>,
+        event_sender: Sender<RxEvent>,
+        mut event_receiver: Receiver<TxEvent>,
         factories: FactoryEntries,
     ) -> Self {
         let event_holder = Arc::new(Mutex::new(EventState {
@@ -168,18 +188,8 @@ impl HttpServer {
         let http_cancel_token = cancel_token.clone();
         let http_instance = tokio::task::spawn(async move {
             let http_instance = rocket::build()
-                // .mount(
-                //     "/",
-                //     routes![
-                //         configuration,
-                //         submit_configuration,
-                //         transit_config,
-                //         submit_transit_config
-                //     ],
-                // )
-                .mount("/api", routes![factories])
-                // .mount("/", FileServer::from(relative!("/static")))
-                // .attach(Template::fairing())
+                .mount("/api/factory", routes![factories])
+                .mount("/api/config", routes![current_config])
                 .manage(BusHolder(event_sender))
                 .manage(EventStateHolder(event_holder))
                 .manage(factories)

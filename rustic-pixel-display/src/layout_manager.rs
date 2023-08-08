@@ -196,7 +196,7 @@ impl<D> Render<D> for LayoutManager<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    fn render(&self, canvas: &mut D) -> anyhow::Result<()> {
+    fn render(&self, canvas: &mut D) -> Result<(), D::Error> {
         for layout in self.layouts.iter() {
             let Layout {
                 size,
@@ -204,9 +204,7 @@ where
                 render,
             } = layout;
 
-            render
-                .render(&mut SubCanvas::new(*offset, *size, canvas))
-                .unwrap();
+            render.render(&mut SubCanvas::new(*offset, *size, canvas))?;
         }
 
         Ok(())

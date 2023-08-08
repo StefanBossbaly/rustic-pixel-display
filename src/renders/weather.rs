@@ -130,7 +130,7 @@ impl<D> Render<D> for Weather
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    fn render(&self, canvas: &mut D) -> Result<()> {
+    fn render(&self, canvas: &mut D) -> Result<(), D::Error> {
         let display_state = self.state.lock();
 
         let color_from_temp = |temp: f32| -> Rgb888 {
@@ -232,8 +232,7 @@ where
         )
         .with_spacing(spacing::FixedMargin(2))
         .arrange()
-        .draw(canvas)
-        .unwrap();
+        .draw(canvas)?;
 
         Ok(())
     }

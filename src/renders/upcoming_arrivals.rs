@@ -140,7 +140,7 @@ impl<D> Render<D> for UpcomingArrivals
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    fn render(&self, canvas: &mut D) -> Result<()> {
+    fn render(&self, canvas: &mut D) -> Result<(), D::Error> {
         let station_name = self.station.to_string();
         let state_unlocked = self.state.lock();
 
@@ -239,8 +239,7 @@ where
         )
         .with_spacing(spacing::FixedMargin(2))
         .arrange()
-        .draw(canvas)
-        .unwrap();
+        .draw(canvas)?;
 
         Ok(())
     }

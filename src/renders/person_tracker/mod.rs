@@ -83,7 +83,7 @@ impl<D> Render<D> for PersonTracker<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    fn render(&self, canvas: &mut D) -> Result<()> {
+    fn render(&self, canvas: &mut D) -> Result<(), D::Error> {
         let mut offset = Point::zero();
         let canvas_bounds = canvas.bounding_box();
 
@@ -117,7 +117,7 @@ where
                     .arrange()
                     .translate(offset);
 
-                    person_layout.draw(canvas).unwrap();
+                    person_layout.draw(canvas)?;
 
                     let person_size = person_layout.bounds().size();
 

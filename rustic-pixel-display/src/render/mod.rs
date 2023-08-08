@@ -10,7 +10,7 @@ pub trait Render<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    fn render(&self, canvas: &mut D) -> Result<()>;
+    fn render(&self, canvas: &mut D) -> Result<(), D::Error>;
 }
 
 pub trait RenderFactory<D>

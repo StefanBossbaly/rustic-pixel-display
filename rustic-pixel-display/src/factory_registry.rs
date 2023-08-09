@@ -95,7 +95,17 @@ where
         }
     }
 
-    pub fn render_current(&self, canvas: &mut D) -> Result<(), D::Error> {
+    pub fn iter(&self) -> impl Iterator<Item = &F> {
+        self.records_map.iter().map(|(_, record)| &record.factory)
+    }
+}
+
+impl<F, D> Render<D> for FactoryRegistry<F, D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+    F: RenderFactory<D>,
+{
+    fn render(&self, canvas: &mut D) -> Result<(), D::Error> {
         if let Some(selected) = &self.selected {
             match self.records_map.get(selected) {
                 Some(record) => match &record.state {
@@ -107,10 +117,6 @@ where
         } else {
             Ok(())
         }
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &F> {
-        self.records_map.iter().map(|(_, record)| &record.factory)
     }
 }
 

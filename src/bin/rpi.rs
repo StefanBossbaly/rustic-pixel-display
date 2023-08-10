@@ -11,10 +11,8 @@ use septa_api::types::RegionalRailStop;
 async fn main() -> Result<()> {
     env_logger::init();
 
-    let transit_render = Box::new(UpcomingArrivals::new(RegionalRailStop::SuburbanStation, 20));
-
-    let _led_driver = driver::MatrixDriver::<RustHardwareDriver>::new(
-        transit_render,
+    let _led_driver = driver::MatrixDriver::new::<RustHardwareDriver, _>(
+        UpcomingArrivals::new(RegionalRailStop::SuburbanStation, 20),
         HardwareConfig {
             hardware_mapping: HardwareMapping::Regular,
             rows: 64,

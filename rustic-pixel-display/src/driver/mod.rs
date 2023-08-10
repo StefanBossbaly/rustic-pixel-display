@@ -10,7 +10,6 @@ use embedded_graphics::{
 use log::{debug, info, warn};
 use std::{
     convert::Infallible,
-    marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::RecvTimeoutError,
@@ -37,7 +36,7 @@ pub trait HardwareDriver: Sized {
     fn display_canvas(&mut self, canvas: Box<Self::Canvas>) -> Box<Self::Canvas>;
 }
 
-pub struct MatrixDriver<D: HardwareDriver> {
+pub struct MatrixDriver {
     /// Flag used to gracefully terminate the render and driver threads
     alive: Arc<AtomicBool>,
 
@@ -46,20 +45,21 @@ pub struct MatrixDriver<D: HardwareDriver> {
 
     /// Handle to the driver thread
     driver_thread_handle: Option<thread::JoinHandle<Result<()>>>,
-
-    /// Even though we have D::Canvas as part of the parameter list, Rust still complains
-    _driver: PhantomData<D>,
 }
 
-impl<D: HardwareDriver> MatrixDriver<D> {
-    pub fn new(
-        render: Box<dyn Render<D::Canvas> + Send + Sync>,
+impl MatrixDriver {
+    pub fn new<H, R>(
+        render: R,
         config: HardwareConfig,
         event_sender_receiver: Option<(
             std::sync::mpsc::Sender<TxEvent>,
             std::sync::mpsc::Receiver<RxEvent>,
         )>,
-    ) -> Result<Self> {
+    ) -> Result<Self>
+    where
+        H: HardwareDriver,
+        R: Render<H::Canvas> + Sync + Send + 'static,
+    {
         let alive = Arc::new(AtomicBool::new(true));
 
         // Clone variable that will be moved into the thread
@@ -68,9 +68,9 @@ impl<D: HardwareDriver> MatrixDriver<D> {
 
         // Channels used to send the canvas between the render and driver threads
         let (driver_to_render_sender, driver_to_render_receiver) =
-            std::sync::mpsc::channel::<Box<D::Canvas>>();
+            std::sync::mpsc::channel::<Box<H::Canvas>>();
         let (render_to_driver_sender, render_to_driver_receiver) =
-            std::sync::mpsc::channel::<Box<D::Canvas>>();
+            std::sync::mpsc::channel::<Box<H::Canvas>>();
 
         // Create the render thread
         let render_thread_handle = thread::spawn(move || -> Result<()> {
@@ -106,7 +106,7 @@ impl<D: HardwareDriver> MatrixDriver<D> {
                 .try_into()
                 .map_err(|_e| anyhow!("Can't convert to RGBMatrixConfig"))?;
 
-            let mut hardware_driver = D::new(hardware_config)?;
+            let mut hardware_driver = H::new(hardware_config)?;
             let canvas = hardware_driver.create_canvas();
             driver_to_render_sender.send(canvas)?;
 
@@ -129,7 +129,7 @@ impl<D: HardwareDriver> MatrixDriver<D> {
                                     .try_into()
                                     .map_err(|_e| anyhow!("Can't convert to RGBMatrixConfig"))?;
 
-                                hardware_driver = D::new(driver_config)?;
+                                hardware_driver = H::new(driver_config)?;
 
                                 driver_to_render_sender.send(hardware_driver.create_canvas())?;
 
@@ -173,12 +173,11 @@ impl<D: HardwareDriver> MatrixDriver<D> {
             alive,
             render_thread_handle: Some(render_thread_handle),
             driver_thread_handle: Some(driver_thread_handle),
-            _driver: PhantomData,
         })
     }
 }
 
-impl<D: HardwareDriver> Drop for MatrixDriver<D> {
+impl Drop for MatrixDriver {
     fn drop(&mut self) {
         let Self {
             alive,

@@ -96,7 +96,7 @@ where
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &F> {
-        self.records_map.iter().map(|(_, record)| &record.factory)
+        self.records_map.values().map(|record| &record.factory)
     }
 }
 

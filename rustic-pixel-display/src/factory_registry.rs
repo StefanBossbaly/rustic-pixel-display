@@ -2,7 +2,7 @@ use crate::render::{Render, RenderFactory};
 use anyhow::Result;
 use embedded_graphics::{pixelcolor::Rgb888, prelude::DrawTarget};
 use serde::Serialize;
-use std::{collections::HashMap, convert::Infallible, io::Read, marker::PhantomData};
+use std::{collections::HashMap, convert::Infallible, io::Read};
 
 enum State<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
     Unloaded,
@@ -21,7 +21,13 @@ where
 {
     records_map: HashMap<String, FactoryRecord<F, D>>,
     selected: Option<String>,
-    _phantom: PhantomData<D>,
+}
+
+unsafe impl<F, D> Send for FactoryRegistry<F, D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+    F: RenderFactory<D>,
+{
 }
 
 impl<F, D> FactoryRegistry<F, D>
@@ -44,7 +50,6 @@ where
                 })
                 .collect::<HashMap<_, _>>(),
             selected: None,
-            _phantom: PhantomData,
         }
     }
 
@@ -129,12 +134,12 @@ pub struct FactoryEntry {
 #[derive(Serialize)]
 pub struct FactoryEntries(Vec<FactoryEntry>);
 
-impl<F, D> From<FactoryRegistry<F, D>> for FactoryEntries
+impl<F, D> From<&FactoryRegistry<F, D>> for FactoryEntries
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
     F: RenderFactory<D>,
 {
-    fn from(factory_registry: FactoryRegistry<F, D>) -> Self {
+    fn from(factory_registry: &FactoryRegistry<F, D>) -> Self {
         let factories = factory_registry
             .iter()
             .map(|factory| FactoryEntry {

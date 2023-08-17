@@ -35,6 +35,8 @@ home-assistant-rest = "0.2.0"
 septa-api = { git = "https://github.com/StefanBossbaly/septa-api.git", branch = "master" }
 geoutils = "0.5.1"
 clap = { version= "4.3", features = ["derive"] }
+rouille = "3.6.2"
+serde_json = "1.0.105"
 
 [lib]
 name = "rustic_pixel_examples"

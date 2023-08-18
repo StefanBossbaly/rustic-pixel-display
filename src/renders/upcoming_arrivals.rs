@@ -283,7 +283,11 @@ where
     }
 
     fn load_from_config<R: Read>(&self, _reader: R) -> Result<Box<dyn Render<D>>> {
-        todo!()
+        // TODO: Actual read the configuration
+        Ok(Box::new(UpcomingArrivals::new(
+            RegionalRailStop::SuburbanStation,
+            8,
+        )))
     }
 }
 

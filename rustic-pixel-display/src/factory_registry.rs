@@ -2,7 +2,7 @@ use crate::render::{Render, RenderFactory};
 use anyhow::Result;
 use embedded_graphics::{pixelcolor::Rgb888, prelude::DrawTarget};
 use serde::Serialize;
-use std::{collections::HashMap, convert::Infallible, io::Read};
+use std::{collections::HashMap, convert::Infallible, error::Error, io::Read};
 
 enum State<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
     Unloaded,
@@ -30,6 +30,27 @@ where
 {
 }
 
+#[derive(Debug)]
+pub enum FactoryRegistryError {
+    FactoryNotFound(String),
+    RenderNotLoaded,
+    RenderNotUnload,
+    FileIoError,
+}
+
+impl Error for FactoryRegistryError {}
+
+impl std::fmt::Display for FactoryRegistryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FactoryNotFound(name) => write!(f, "Factory \"{}\" was not found", name),
+            Self::RenderNotLoaded => write!(f, "Render was not loaded"),
+            Self::RenderNotUnload => write!(f, "Render was not unloaded"),
+            Self::FileIoError => write!(f, "File IO error"),
+        }
+    }
+}
+
 impl<F, D> FactoryRegistry<F, D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
@@ -53,24 +74,26 @@ where
         }
     }
 
-    pub fn load<R: Read>(&mut self, name: &str, reader: R) -> Result<bool> {
+    pub fn load<R: Read>(&mut self, name: &str, reader: R) -> Result<(), FactoryRegistryError> {
         match self.records_map.get_mut(name) {
             Some(record) => match record.state {
-                State::Unloaded => {
-                    let render = record.factory.load_from_config(reader)?;
-                    record.state = State::Loaded(render);
-                    Ok(true)
-                }
-                State::Loaded(_) => Ok(false),
+                State::Unloaded => match record.factory.load_from_config(reader) {
+                    Ok(render) => {
+                        record.state = State::Loaded(render);
+                        Ok(())
+                    }
+                    Err(_) => Err(FactoryRegistryError::FileIoError),
+                },
+                State::Loaded(_) => Err(FactoryRegistryError::RenderNotUnload),
             },
-            None => Ok(false),
+            None => Err(FactoryRegistryError::FactoryNotFound(name.to_owned())),
         }
     }
 
-    pub fn unload(&mut self, name: &str) -> bool {
+    pub fn unload(&mut self, name: &str) -> Result<(), FactoryRegistryError> {
         match self.records_map.get_mut(name) {
             Some(record) => match record.state {
-                State::Unloaded => false,
+                State::Unloaded => Err(FactoryRegistryError::RenderNotLoaded),
                 State::Loaded(_) => {
                     // Check to see if the current render being unloaded was selected
                     if let Some(selected) = &self.selected {
@@ -80,24 +103,28 @@ where
                     }
 
                     record.state = State::Unloaded;
-                    true
+                    Ok(())
                 }
             },
-            None => false,
+            None => Err(FactoryRegistryError::FactoryNotFound(name.to_owned())),
         }
     }
 
-    pub fn select(&mut self, name: &str) -> bool {
+    pub fn select(&mut self, name: &str) -> Result<(), FactoryRegistryError> {
         match self.records_map.get(name) {
             Some(record) => match record.state {
-                State::Unloaded => false,
+                State::Unloaded => Err(FactoryRegistryError::RenderNotLoaded),
                 State::Loaded(_) => {
                     self.selected = Some(name.to_owned());
-                    true
+                    Ok(())
                 }
             },
-            None => false,
+            None => Err(FactoryRegistryError::FactoryNotFound(name.to_owned())),
         }
+    }
+
+    pub fn clear(&mut self) -> Option<String> {
+        self.selected.take()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &F> {

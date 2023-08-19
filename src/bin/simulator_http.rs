@@ -72,7 +72,7 @@ async fn main() -> Result<()> {
                 let entries: FactoryEntries = (&*factory_registry_unlock).into();
                 Response::json(&entries)
             },
-            (GET) (/factory/load/{render_name: String}) => {
+            (POST) (/factory/load/{render_name: String}) => {
                 let json_reader = try_or_400!(if let Some(header) = request.header("Content-Type") {
                     if !header.starts_with("application/json") {
                         Err(JsonError::WrongContentType)
@@ -162,6 +162,7 @@ async fn main() -> Result<()> {
         }
     }
 
+    //
     http_task.abort();
     render_task.abort();
 

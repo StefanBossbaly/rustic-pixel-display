@@ -106,6 +106,121 @@ async fn main() -> Result<()> {
 More information about the simulator and its dependencies can be found on the [embedded-graphics-simulator](https://crates.io/crates/embedded-graphics-simulator)
 crate page.
 
+## HTTP API
+
+#### Factory API
+
+<details>
+  <summary><code>POST</code> <code><b>/factory/load/{factory_name}</b></code> <code>(Loads the render produced by the factory into memory)</code></summary>
+
+##### Parameters
+
+> | name           | type     | data type | description                                              |
+> | -------------- | -------- | --------- | -------------------------------------------------------- |
+> | `factory_name` | required | string    | The name of the factory described in the `discover` call |
+
+##### Request Body
+
+> Must be a serialized JSON object. The render factory will parse it and attempt to build the associated
+> render.
+
+##### Responses
+
+> | http code | content-type               | response                                                        |
+> | --------- | -------------------------- | --------------------------------------------------------------- |
+> | `200`     | `text/plain;charset=UTF-8` | `Render loaded successfully`                                    |
+> | `400`     | `application/json`         | `{"description":"Render was not loaded","cause":"Bad Request"}` |
+
+##### Example cURL
+
+> ```javascript
+>  curl -X POST -H "Content-Type: application/json" --data '{"station": "Downingtown"}' http://localhost:8080/factory/load/{render_name}
+> ```
+
+</details>
+
+<details>
+  <summary><code>POST</code> <code><b>/factory/unload/{factory_name}</b></code> <code>(Unloads a render created by a factory)</code></summary>
+
+##### Parameters
+
+> | name           | type     | data type | description                                              |
+> | -------------- | -------- | --------- | -------------------------------------------------------- |
+> | `factory_name` | required | string    | The name of the factory described in the `discover` call |
+
+##### Request Body
+
+> None
+
+##### Responses
+
+> | http code | content-type               | response                                                        |
+> | --------- | -------------------------- | --------------------------------------------------------------- |
+> | `200`     | `text/plain;charset=UTF-8` | `Render unloaded successfully`                                  |
+> | `400`     | `application/json`         | `{"description":"Render was not loaded","cause":"Bad Request"}` |
+
+##### Example cURL
+
+> ```javascript
+>  curl -X POST -H "Content-Type: application/json" http://localhost:8080/factory/unload/{render_name}
+> ```
+
+</details>
+
+<details>
+  <summary><code>POST</code> <code><b>/factory/select/{factory_name}</b></code> <code>(Selects a render to be displayed)</code></summary>
+
+##### Parameters
+
+> | name           | type     | data type | description                                              |
+> | -------------- | -------- | --------- | -------------------------------------------------------- |
+> | `factory_name` | required | string    | The name of the factory described in the `discover` call |
+
+##### Request Body
+
+> None
+
+##### Responses
+
+> | http code | content-type               | response                                                        |
+> | --------- | -------------------------- | --------------------------------------------------------------- |
+> | `200`     | `text/plain;charset=UTF-8` | `Render selected successfully`                                  |
+> | `400`     | `application/json`         | `{"description":"Render was not loaded","cause":"Bad Request"}` |
+
+##### Example cURL
+
+> ```javascript
+>  curl -X POST -H "Content-Type: application/json" http://localhost:8080/factory/select/{render_name}
+> ```
+
+</details>
+
+<details>
+  <summary><code>POST</code> <code><b>/factory/clear</b></code> <code>(Clears any selected render)</code></summary>
+
+##### Parameters
+
+> None
+
+##### Request Body
+
+> None
+
+##### Responses
+
+> | http code | content-type               | response                                                        |
+> | --------- | -------------------------- | --------------------------------------------------------------- |
+> | `200`     | `text/plain;charset=UTF-8` | `Render selected successfully`                                  |
+> | `400`     | `application/json`         | `{"description":"Render was not loaded","cause":"Bad Request"}` |
+
+##### Example cURL
+
+> ```javascript
+>  curl -X POST -H "Content-Type: application/json" --data @post.json http://localhost:8889/
+> ```
+
+</details>
+
 ## Authors
 
 Stefan Bossbaly

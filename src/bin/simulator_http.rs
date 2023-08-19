@@ -9,7 +9,7 @@ use embedded_graphics_simulator::{
     OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
 use parking_lot::Mutex;
-use rouille::{input::json::JsonError, router, try_or_400, Response};
+use rouille::{input::json::JsonError, router, try_or_400, Request, Response};
 use rustic_pixel_display::{
     factory_registry::{FactoryEntries, FactoryRegistry},
     render::Render,
@@ -21,6 +21,7 @@ use rustic_pixel_examples::renders::{
 use serde_json::json;
 use std::{
     convert::Infallible,
+    io::Read,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -38,6 +39,22 @@ const DISPLAY_SIZE: Size = Size {
 enum RenderFactoryEntries<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
     TransitTracker(TransitTrackerFactory<D>),
     UpcomingArrivals(UpcomingArrivalsFactory<D>),
+}
+
+pub fn json_input_to_reader(request: &Request) -> Result<impl Read + '_, JsonError> {
+    if let Some(header) = request.header("Content-Type") {
+        if !header.starts_with("application/json") {
+            return Err(JsonError::WrongContentType);
+        }
+    } else {
+        return Err(JsonError::WrongContentType);
+    }
+
+    if let Some(body) = request.data() {
+        Ok(body)
+    } else {
+        Err(JsonError::BodyAlreadyExtracted)
+    }
 }
 
 #[tokio::main]
@@ -73,47 +90,23 @@ async fn main() -> Result<()> {
                 Response::json(&entries)
             },
             (POST) (/factory/load/{render_name: String}) => {
-                let json_reader = try_or_400!(if let Some(header) = request.header("Content-Type") {
-                    if !header.starts_with("application/json") {
-                        Err(JsonError::WrongContentType)
-                    } else if let Some(b) = request.data() {
-                        Ok(b)
-                    } else {
-                        Err(JsonError::BodyAlreadyExtracted)
-                    }
-                } else {
-                    Err(JsonError::WrongContentType)
-                });
+                // Attempt to read the JSON input from the request body
+                let json_reader = try_or_400!(json_input_to_reader(request));
 
-                Response::json(
-                    &match factory_registry_unlock.load(&render_name, json_reader) {
-                        Ok(_) => {
-                            json!({
-                                "success": true,
-                            })
-                        }
-                        Err(e) => {
-                            json!({
-                                "success": false,
-                                "error": format!("{}", e)
-                            })
-                        }
-                    }
-                )
+                // Attempt to load the render into the registry
+                try_or_400!(factory_registry_unlock.load(&render_name, json_reader));
+
+                Response::text("Render loaded successfully")
             },
-            (GET) (/factory/unload/{render_name: String}) => {
-                Response::json(&match factory_registry_unlock.unload(&render_name) {
-                    Ok(_) => json!({"success" : true}),
-                    Err(e) => json!({"success" : false, "error": format!("{}", e)})
-                })
+            (POST) (/factory/unload/{render_name: String}) => {
+                try_or_400!(factory_registry_unlock.unload(&render_name));
+                Response::text("Render unloaded successfully")
             },
-            (GET) (/factory/select/{render_name: String}) => {
-                Response::json(&match factory_registry_unlock.select(&render_name) {
-                    Ok(_) => json!({"success" : true}),
-                    Err(e) => json!({"success" : false, "error": format!("{}", e)})
-                })
+            (POST) (/factory/select/{render_name: String}) => {
+                try_or_400!(factory_registry_unlock.select(&render_name));
+                Response::text("Render selected successfully")
             },
-            (GET) (/factory/clear) => {
+            (POST) (/factory/clear) => {
                 Response::json(&match factory_registry_unlock.clear() {
                     Some(_) => json!({"success" : true}),
                     None => json!({"success" : false})

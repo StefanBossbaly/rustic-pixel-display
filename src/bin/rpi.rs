@@ -4,7 +4,7 @@ use rustic_pixel_display::{
     driver::{self, RustHardwareDriver},
 };
 
-use rustic_pixel_examples::renders::upcoming_arrivals::UpcomingArrivals;
+use rustic_pixel_examples::renders::upcoming_arrivals::{UpcomingArrivals, UpcomingArrivalsConfig};
 use septa_api::types::RegionalRailStop;
 
 #[tokio::main]
@@ -12,7 +12,10 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     let _led_driver = driver::MatrixDriver::new::<RustHardwareDriver, _>(
-        UpcomingArrivals::new(RegionalRailStop::SuburbanStation, 20),
+        UpcomingArrivals::new(UpcomingArrivalsConfig {
+            station: RegionalRailStop::SuburbanStation,
+            results: Some(20),
+        }),
         HardwareConfig {
             hardware_mapping: HardwareMapping::Regular,
             rows: 64,

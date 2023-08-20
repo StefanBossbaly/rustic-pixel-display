@@ -31,6 +31,12 @@ struct UpcomingTrainsState {
     arrivals: Vec<Arrivals>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpcomingArrivalsConfig {
+    pub station: RegionalRailStop,
+    pub results: Option<u8>,
+}
+
 pub struct UpcomingArrivals {
     state: Arc<Mutex<UpcomingTrainsState>>,
 
@@ -51,7 +57,7 @@ lazy_static! {
 }
 
 impl UpcomingArrivals {
-    pub fn new(station: RegionalRailStop, results: u8) -> Self {
+    pub fn new(config: UpcomingArrivalsConfig) -> Self {
         let septa_api = septa_api::Client::new();
 
         let state = Arc::new(Mutex::new(UpcomingTrainsState::default()));
@@ -59,7 +65,8 @@ impl UpcomingArrivals {
 
         let task_cancel_token = cancel_token.clone();
         let task_state = state.clone();
-        let task_station = station.clone();
+        let task_station = config.station.clone();
+        let task_results = config.results;
 
         let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
             loop {
@@ -68,7 +75,7 @@ impl UpcomingArrivals {
                 match septa_api
                     .arrivals(ArrivalsRequest {
                         station: task_station.clone(),
-                        results: Some(results),
+                        results: task_results,
                         direction: None,
                     })
                     .await
@@ -89,7 +96,7 @@ impl UpcomingArrivals {
                         let mut state_unlocked = task_state.lock();
                         state_unlocked.arrivals = arrivals
                             .into_iter()
-                            .take((results * 2) as usize)
+                            .take((task_results.unwrap_or(3) * 2) as usize)
                             .collect::<Vec<_>>();
                     }
                     Err(e) => error!("Could not get updated information {e}"),
@@ -106,7 +113,7 @@ impl UpcomingArrivals {
 
         Self {
             state,
-            station,
+            station: config.station,
             cancel_token,
             update_task_handle: Some(update_task_handle),
         }
@@ -245,13 +252,6 @@ where
     }
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Deserialize, Debug)]
-pub struct UpcomingArrivalsConfig {
-    station: RegionalRailStop,
-    limit: Option<u8>,
-}
-
 pub struct UpcomingArrivalsFactory<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
@@ -282,12 +282,9 @@ where
         "Upcoming train arrivals for SEPTA regional rail"
     }
 
-    fn load_from_config<R: Read>(&self, _reader: R) -> Result<Box<dyn Render<D>>> {
-        // TODO: Actual read the configuration
-        Ok(Box::new(UpcomingArrivals::new(
-            RegionalRailStop::SuburbanStation,
-            8,
-        )))
+    fn load_from_config<R: Read>(&self, reader: R) -> Result<Box<dyn Render<D>>> {
+        let config: UpcomingArrivalsConfig = serde_json::from_reader(reader)?;
+        Ok(Box::new(UpcomingArrivals::new(config)))
     }
 }
 

@@ -14,7 +14,7 @@ use rustic_pixel_examples::renders::{
         HomeAssistantTracker, HomeTrackerConfig, PersonTracker, StateProvider, TransitTracker,
         TransitTrackerConfig,
     },
-    upcoming_arrivals::UpcomingArrivals,
+    upcoming_arrivals::{UpcomingArrivals, UpcomingArrivalsConfig},
 };
 use std::{collections::HashMap, env::var, vec};
 
@@ -48,10 +48,10 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     let render: Box<dyn Render<_>> = match args.command {
-        Commands::UpcomingArrivals => Box::new(UpcomingArrivals::new(
-            septa_api::types::RegionalRailStop::SuburbanStation,
-            20,
-        )),
+        Commands::UpcomingArrivals => Box::new(UpcomingArrivals::new(UpcomingArrivalsConfig {
+            station: septa_api::types::RegionalRailStop::SuburbanStation,
+            results: Some(20),
+        })),
         Commands::PersonTracker => {
             let hass_url: String = var("HASS_URL")
                 .expect("Pleases set HASS_URL to the url of the home assistant instance");

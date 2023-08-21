@@ -252,6 +252,16 @@ where
     }
 }
 
+impl Drop for UpcomingArrivals {
+    fn drop(&mut self) {
+        self.cancel_token.cancel();
+
+        if let Some(task_handle) = self.update_task_handle.take() {
+            task_handle.abort();
+        }
+    }
+}
+
 pub struct UpcomingArrivalsFactory<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
@@ -285,15 +295,5 @@ where
     fn load_from_config<R: Read>(&self, reader: R) -> Result<Box<dyn Render<D>>> {
         let config: UpcomingArrivalsConfig = serde_json::from_reader(reader)?;
         Ok(Box::new(UpcomingArrivals::new(config)))
-    }
-}
-
-impl Drop for UpcomingArrivals {
-    fn drop(&mut self) {
-        self.cancel_token.cancel();
-
-        if let Some(task_handle) = self.update_task_handle.take() {
-            task_handle.abort();
-        }
     }
 }

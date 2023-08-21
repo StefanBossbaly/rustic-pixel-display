@@ -108,7 +108,101 @@ crate page.
 
 ## HTTP API
 
-#### Factory API
+### Render API
+
+Renders are constructed from a configuration provided to a Render Factory. Once loaded, their configuration can not be changed and
+if a reconfiguration is required, the caller must construct a new render and remove the previous one. Once a render is created,
+they can be given a layout slot to draw on by using the [Layout API](#layout-api). However it is completely valid for a render to
+not be assigned a layout slot, therefore not draw anything on the output display. This can be useful for stateful Renders, which
+will have background tasks running that update the render's state meaning they can't simply be loaded when the user requests them
+since they would be missing important temporal context.
+
+<details>
+  <summary><code>GET</code> <code><b>/render/active</b></code> <code>(Returns the active renders current loaded)</code></summary>
+
+##### Parameters
+
+> None
+
+##### Request Body
+
+> Must be a serialized JSON object. The render factory will parse it and attempt to build the associated
+> render.
+
+##### Responses
+
+> | http code | content-type       | response  |
+> | --------- | ------------------ | --------- |
+> | `200`     | `application/json` | See Below |
+
+##### Response Body
+
+> ```javascript
+> [
+>   {
+>     id: "unique_id",
+>     factory_name: "FactoryName",
+>   },
+> ];
+> ```
+
+##### Example cURL
+
+> ```javascript
+>  curl -X POST -H "Content-Type: application/json" --data '{"station": "Downingtown"}' http://localhost:8080/factory/load/{render_name}
+> ```
+
+</details>
+
+<details>
+  <summary><code>DELETE</code> <code><b>/render/{render_id}</b></code> <code>(Unloads a render instance from memory)</code></summary>
+
+##### Overview
+
+Unloads and removes a render instance. If the render was selected for a layout, the render will also be removed from that layout.
+
+##### Parameters
+
+> | name        | type     | data type | description                                        |
+> | ----------- | -------- | --------- | -------------------------------------------------- |
+> | `render_id` | required | string    | The unique id provided when the render was created |
+
+##### Request Body
+
+> None
+
+##### Responses
+
+> | http code | content-type               | response                                                        |
+> | --------- | -------------------------- | --------------------------------------------------------------- |
+> | `200`     | `text/plain;charset=UTF-8` | `Render unloaded successfully`                                  |
+> | `400`     | `application/json`         | `{"description":"Render was not loaded","cause":"Bad Request"}` |
+
+##### Example cURL
+
+> ```javascript
+>  curl -X POST -H "Content-Type: application/json" http://localhost:8080/factory/unload/{render_name}
+> ```
+
+</details>
+
+### Factory API
+
+Render Factories are compiled into the executable and are immutable. A caller can determine what factories are included in the program
+by using the `/factory/discover` call. Their job is to read the configuration provided and construct a render that represents the
+provided configuration parameters. Since each factory is different, the configuration schema will change from factory to factory. Because
+of this, factories must also tell the caller the schema of the configuration they wish the user to provide them. This is accomplished in
+the `/factory/details/{factory_name}` call. There may me multiple instances of renders that were created by the same Render Factory. Once
+the render is crated, the Factory no longer plays a role it its lifetime management and the caller must use the [Render API](#render-api)
+to interact with it.
+
+<details>
+  <summary><code>GET</code> <code><b>/factory/discover</b></code> <code>(Returns all available Render Factories)</code></summary>
+</details>
+
+<details>
+  <summary><code>GET</code> <code><b>/factory/details/{factory_name}</b></code> <code>(Returns details about a specific render factory)</code></summary>
+</details>
 
 <details>
   <summary><code>POST</code> <code><b>/factory/load/{factory_name}</b></code> <code>(Loads the render produced by the factory into memory)</code></summary>
@@ -139,86 +233,29 @@ crate page.
 
 </details>
 
+### Layout API
+
+Layouts allow multiple renders to output on the save LED Matrix Panel. Currently layouts are mutually exclusive, meaning that renders
+can not draw overtop of each other. It is possible for the same Render instance to hold multiple layout slots.
+
 <details>
-  <summary><code>POST</code> <code><b>/factory/unload/{factory_name}</b></code> <code>(Unloads a render created by a factory)</code></summary>
-
-##### Parameters
-
-> | name           | type     | data type | description                                              |
-> | -------------- | -------- | --------- | -------------------------------------------------------- |
-> | `factory_name` | required | string    | The name of the factory described in the `discover` call |
-
-##### Request Body
-
-> None
-
-##### Responses
-
-> | http code | content-type               | response                                                        |
-> | --------- | -------------------------- | --------------------------------------------------------------- |
-> | `200`     | `text/plain;charset=UTF-8` | `Render unloaded successfully`                                  |
-> | `400`     | `application/json`         | `{"description":"Render was not loaded","cause":"Bad Request"}` |
-
-##### Example cURL
-
-> ```javascript
->  curl -X POST -H "Content-Type: application/json" http://localhost:8080/factory/unload/{render_name}
-> ```
-
+  <summary><code>GET</code> <code><b>/layout/discover</b></code> <code>(Returns the supported layout configurations)</code></summary>
 </details>
 
 <details>
-  <summary><code>POST</code> <code><b>/factory/select/{factory_name}</b></code> <code>(Selects a render to be displayed)</code></summary>
-
-##### Parameters
-
-> | name           | type     | data type | description                                              |
-> | -------------- | -------- | --------- | -------------------------------------------------------- |
-> | `factory_name` | required | string    | The name of the factory described in the `discover` call |
-
-##### Request Body
-
-> None
-
-##### Responses
-
-> | http code | content-type               | response                                                        |
-> | --------- | -------------------------- | --------------------------------------------------------------- |
-> | `200`     | `text/plain;charset=UTF-8` | `Render selected successfully`                                  |
-> | `400`     | `application/json`         | `{"description":"Render was not loaded","cause":"Bad Request"}` |
-
-##### Example cURL
-
-> ```javascript
->  curl -X POST -H "Content-Type: application/json" http://localhost:8080/factory/select/{render_name}
-> ```
-
+  <summary><code>GET</code> <code><b>/layout/active</b></code> <code>(Returns the active layout and associated renders)</code></summary>
 </details>
 
 <details>
-  <summary><code>POST</code> <code><b>/factory/clear</b></code> <code>(Clears any selected render)</code></summary>
+  <summary><code>POST</code> <code><b>/layout/config</b></code> <code>(Configures the layout into a new configuration)</code></summary>
+</details>
 
-##### Parameters
+<details>
+  <summary><code>POST</code> <code><b>/layout/select/{layout_slot}</b></code> <code>(Configures a render to draw in a layout slot)</code></summary>
+</details>
 
-> None
-
-##### Request Body
-
-> None
-
-##### Responses
-
-> | http code | content-type               | response                                                        |
-> | --------- | -------------------------- | --------------------------------------------------------------- |
-> | `200`     | `text/plain;charset=UTF-8` | `Render selected successfully`                                  |
-> | `400`     | `application/json`         | `{"description":"Render was not loaded","cause":"Bad Request"}` |
-
-##### Example cURL
-
-> ```javascript
->  curl -X POST -H "Content-Type: application/json" --data @post.json http://localhost:8889/
-> ```
-
+<details>
+  <summary><code>POST</code> <code><b>/layout/clear/{layout_slot}</b></code> <code>(Removes the current render in the layout slot)</code></summary>
 </details>
 
 ## Authors

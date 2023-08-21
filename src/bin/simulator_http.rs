@@ -14,6 +14,7 @@ use rustic_pixel_display::{
 use rustic_pixel_display_macros::RenderFactories;
 use rustic_pixel_examples::renders::{
     person_tracker::TransitTrackerFactory, upcoming_arrivals::UpcomingArrivalsFactory,
+    weather::WeatherFactory,
 };
 use std::{
     convert::Infallible,
@@ -34,6 +35,7 @@ const DISPLAY_SIZE: Size = Size {
 enum RenderFactoryEntries<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
     TransitTracker(TransitTrackerFactory<D>),
     UpcomingArrivals(UpcomingArrivalsFactory<D>),
+    Weather(WeatherFactory<D>),
 }
 
 #[tokio::main]
@@ -41,15 +43,20 @@ async fn main() -> Result<()> {
     // Get the handle to the created Tokio Runtime
     let handle = Handle::current();
 
+    // Create the factory registry. This will house all the registered RenderFactories that can
+    // be used to construct renders.
     let factory_registry = {
         let factory_registry: FactoryRegistry<RenderFactoryEntries<SimulatorDisplay<_>>, _> =
             FactoryRegistry::new(RenderFactoryEntries::factories());
         Arc::new(Mutex::new(factory_registry))
     };
 
+    // Since we will be sharing the registry between the HTTP thread and the render thread, we
+    // need to clone since they will be moved into the lambda expression.
     let http_registry = factory_registry.clone();
     let render_registry = factory_registry;
 
+    // Same with the alive variable
     let alive = Arc::new(AtomicBool::new(true));
     let http_alive = alive.clone();
     let render_alive = alive;

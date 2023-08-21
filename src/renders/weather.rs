@@ -13,9 +13,11 @@ use embedded_layout::{
 };
 use log::error;
 use parking_lot::Mutex;
-use rustic_pixel_display::render::Render;
+use rustic_pixel_display::render::{Render, RenderFactory};
 use serde::Deserialize;
-use std::{convert::Infallible, net::IpAddr, sync::Arc, time::Duration};
+use std::{
+    convert::Infallible, io::Read, marker::PhantomData, net::IpAddr, sync::Arc, time::Duration,
+};
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use weer_api::{chrono::Utc, BaseApi, Client};
@@ -62,9 +64,9 @@ impl From<weer_api::Forecast> for DisplayForecast {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
 pub struct Configuration {
     pub api_key: String,
-
     pub location: Location,
 }
 
@@ -245,5 +247,41 @@ impl Drop for Weather {
         if let Some(task_handle) = self.update_forecast_handle.take() {
             task_handle.abort();
         }
+    }
+}
+
+pub struct WeatherFactory<D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    _phantom: PhantomData<D>,
+}
+
+impl<D> Default for WeatherFactory<D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    fn default() -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<D> RenderFactory<D> for WeatherFactory<D>
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    fn render_name(&self) -> &'static str {
+        "Weather"
+    }
+
+    fn render_description(&self) -> &'static str {
+        "Display weather information about a location"
+    }
+
+    fn load_from_config<R: Read>(&self, reader: R) -> Result<Box<dyn Render<D>>> {
+        let config: Configuration = serde_json::from_reader(reader)?;
+        Ok(Box::new(Weather::new(config)))
     }
 }

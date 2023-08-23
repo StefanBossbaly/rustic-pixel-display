@@ -95,7 +95,7 @@ where
                 )
             },
             (DELETE) (/render/{uuid: Uuid}) => {
-                try_or_404!(registry_unlock.unload(&uuid));
+                try_or_404!(registry_unlock.unload(uuid));
                 Response::empty_204()
             },
             (GET) (/factory/discovery) => {
@@ -125,7 +125,7 @@ where
                 })
             },
             (POST) (/layout_manager/select/{uuid: Uuid}) => {
-                try_or_404!(registry_unlock.select(&uuid));
+                try_or_404!(registry_unlock.select(uuid));
                 Response::empty_204()
             },
             // If none of the other blocks matches the request, return a 404 response.

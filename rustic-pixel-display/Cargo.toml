@@ -29,7 +29,7 @@ strum_macros = "0.25"
 anyhow = "1.0.71"
 log = "0.4.19"
 parking_lot = "0.12.1"
-uuid = "1.4.1"
+uuid = { version = "1.4", features = ["v4"] }
 rustic_pixel_display_macros = { path = "macros" }
 
 # Feature http_server dependencies

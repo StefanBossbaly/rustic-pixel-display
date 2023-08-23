@@ -1,5 +1,4 @@
 use anyhow::Result;
-
 use embedded_graphics::{
     pixelcolor::Rgb888,
     prelude::{DrawTarget, Point, RgbColor, Size},
@@ -8,14 +7,22 @@ use embedded_graphics::{
 use embedded_graphics_simulator::{
     OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use rustic_pixel_display::{
-    factory_registry::FactoryRegistry, http_server::HttpServer, render::Render,
-};
+use parking_lot::Mutex;
+use rustic_pixel_display::{http_server::build_api_server, registry::Registry, render::Render};
 use rustic_pixel_display_macros::RenderFactories;
 use rustic_pixel_examples::renders::{
     person_tracker::TransitTrackerFactory, upcoming_arrivals::UpcomingArrivalsFactory,
+    weather::WeatherFactory,
 };
-use std::{convert::Infallible, vec};
+use std::{
+    convert::Infallible,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    vec,
+};
+use tokio::{runtime::Handle, task};
 
 const DISPLAY_SIZE: Size = Size {
     width: 256,
@@ -26,37 +33,70 @@ const DISPLAY_SIZE: Size = Size {
 enum RenderFactoryEntries<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
     TransitTracker(TransitTrackerFactory<D>),
     UpcomingArrivals(UpcomingArrivalsFactory<D>),
+    Weather(WeatherFactory<D>),
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
+    // Get the handle to the created Tokio Runtime
+    let handle = Handle::current();
 
-    let output_settings = OutputSettingsBuilder::new().scale(4).max_fps(60).build();
-    let mut window = Window::new("Simulator", &output_settings);
-    let mut canvas: SimulatorDisplay<Rgb888> = SimulatorDisplay::<Rgb888>::new(DISPLAY_SIZE);
+    // Create the factory registry. This will house all the registered RenderFactories that can
+    // be used to construct renders.
+    let factory_registry = {
+        let factory_registry: Registry<RenderFactoryEntries<SimulatorDisplay<_>>, _> =
+            Registry::new(RenderFactoryEntries::factories());
+        Arc::new(Mutex::new(factory_registry))
+    };
 
-    let factory_registry: FactoryRegistry<RenderFactoryEntries<SimulatorDisplay<_>>, _> =
-        FactoryRegistry::new(RenderFactoryEntries::factories());
+    // Since we will be sharing the registry between the HTTP thread and the render thread, we
+    // need to clone since they will be moved into the lambda expression.
+    let http_registry = factory_registry.clone();
+    let render_registry = factory_registry;
 
-    let (rx_event_sender, _rx_event_receiver) = tokio::sync::mpsc::channel(128);
-    let (_tx_event_sender, tx_event_receiver) = tokio::sync::mpsc::channel(128);
+    // Same with the alive variable
+    let alive = Arc::new(AtomicBool::new(true));
+    let http_alive = alive.clone();
+    let render_alive = alive;
 
-    let _http_server = HttpServer::new(rx_event_sender, tx_event_receiver, factory_registry.into());
+    let http_task = task::spawn(async move {
+        let server = build_api_server("localhost:8080", handle, http_registry);
 
-    'render_loop: loop {
-        canvas
-            .fill_solid(&Rectangle::new(Point::zero(), DISPLAY_SIZE), Rgb888::BLACK)
-            .unwrap();
+        while http_alive.load(Ordering::SeqCst) {
+            server.poll();
+        }
+    });
 
-        window.update(&canvas);
+    let render_task = task::spawn(async move {
+        let output_settings = OutputSettingsBuilder::new().scale(4).max_fps(60).build();
+        let mut window = Window::new("Simulator", &output_settings);
+        let mut canvas: SimulatorDisplay<Rgb888> = SimulatorDisplay::<Rgb888>::new(DISPLAY_SIZE);
 
-        for event in window.events() {
-            if event == SimulatorEvent::Quit {
-                break 'render_loop;
+        while render_alive.load(Ordering::SeqCst) {
+            canvas
+                .fill_solid(&Rectangle::new(Point::zero(), DISPLAY_SIZE), Rgb888::BLACK)
+                .unwrap();
+
+            render_registry.lock().render(&mut canvas).unwrap();
+            window.update(&canvas);
+
+            for event in window.events() {
+                if event == SimulatorEvent::Quit {
+                    render_alive.store(false, Ordering::SeqCst);
+                }
             }
         }
+    });
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            println!("Ctrl+C received!");
+        }
     }
+
+    //
+    http_task.abort();
+    render_task.abort();
 
     Ok(())
 }

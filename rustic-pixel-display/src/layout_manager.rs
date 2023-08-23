@@ -1,8 +1,9 @@
 use crate::render::{Render, SubCanvas};
 use embedded_graphics::{
     pixelcolor::Rgb888,
-    prelude::{DrawTarget, Point, Size},
+    prelude::{DrawTarget, Point, RgbColor, Size},
 };
+use serde::Serialize;
 use std::convert::Infallible;
 
 type SubRender<D> = Box<dyn for<'a> Render<SubCanvas<'a, D>>>;
@@ -11,21 +12,43 @@ pub enum CommonLayout<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    Single(SubRender<D>),
+    Single(Option<SubRender<D>>),
     SplitWidth {
-        left: SubRender<D>,
-        right: SubRender<D>,
+        left: Option<SubRender<D>>,
+        right: Option<SubRender<D>>,
     },
     SplitHeight {
-        top: SubRender<D>,
-        bottom: SubRender<D>,
+        top: Option<SubRender<D>>,
+        bottom: Option<SubRender<D>>,
     },
     Split4 {
-        top_left: SubRender<D>,
-        top_right: SubRender<D>,
-        bottom_left: SubRender<D>,
-        bottom_right: SubRender<D>,
+        top_left: Option<SubRender<D>>,
+        top_right: Option<SubRender<D>>,
+        bottom_left: Option<SubRender<D>>,
+        bottom_right: Option<SubRender<D>>,
     },
+}
+
+#[derive(Clone, Copy, Serialize)]
+pub enum LayoutType {
+    Single,
+    SplitWidth,
+    SplitHeight,
+    Split4,
+}
+
+impl<D> From<&CommonLayout<D>> for LayoutType
+where
+    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+{
+    fn from(value: &CommonLayout<D>) -> Self {
+        match value {
+            CommonLayout::Single(_) => Self::Single,
+            CommonLayout::SplitWidth { .. } => Self::SplitWidth,
+            CommonLayout::SplitHeight { .. } => Self::SplitHeight,
+            CommonLayout::Split4 { .. } => Self::Split4,
+        }
+    }
 }
 
 struct Layout<D>
@@ -34,7 +57,7 @@ where
 {
     size: Size,
     offset: Point,
-    render: SubRender<D>,
+    render: Option<SubRender<D>>,
 }
 
 pub struct LayoutManager<D>
@@ -42,22 +65,18 @@ where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
     layouts: Vec<Layout<D>>,
+    layout_type: LayoutType,
 }
 
 impl<D> LayoutManager<D>
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
-    pub fn new() -> LayoutManager<D> {
-        Self {
-            layouts: Vec::new(),
-        }
-    }
-
     pub fn from_common_layout(
         common_layout: CommonLayout<D>,
         canvas_size: Size,
     ) -> LayoutManager<D> {
+        let layout_type = (&common_layout).into();
         let layouts = match common_layout {
             CommonLayout::Single(render) => {
                 vec![Layout {
@@ -171,24 +190,22 @@ where
             }
         };
 
-        Self { layouts }
+        Self {
+            layouts,
+            layout_type,
+        }
     }
 
-    pub fn add_render(&mut self, canvas_size: Size, canvas_offset: Point, render: SubRender<D>) {
-        self.layouts.push(Layout {
-            size: canvas_size,
-            offset: canvas_offset,
-            render,
-        })
+    pub fn len(&self) -> usize {
+        self.layouts.len()
     }
-}
 
-impl<D> Default for LayoutManager<D>
-where
-    D: DrawTarget<Color = Rgb888, Error = Infallible>,
-{
-    fn default() -> Self {
-        Self::new()
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn layout(&self) -> LayoutType {
+        self.layout_type
     }
 }
 
@@ -204,7 +221,13 @@ where
                 render,
             } = layout;
 
-            render.render(&mut SubCanvas::new(*offset, *size, canvas))?;
+            let mut sub_canvas = SubCanvas::new(*offset, *size, canvas);
+
+            if let Some(render) = render {
+                render.render(&mut sub_canvas)?;
+            } else {
+                sub_canvas.clear(Rgb888::BLACK)?;
+            }
         }
 
         Ok(())

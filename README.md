@@ -106,6 +106,326 @@ async fn main() -> Result<()> {
 More information about the simulator and its dependencies can be found on the [embedded-graphics-simulator](https://crates.io/crates/embedded-graphics-simulator)
 crate page.
 
+## HTTP API
+
+### Render API
+
+Renders are constructed from a configuration provided to a Render Factory. Once loaded, their configuration can not be changed and
+if a reconfiguration is required, the caller must construct a new render and remove the previous one. Once a render is created,
+they can be given a layout slot to draw on by using the [Layout API](#layout-api). However it is completely valid for a render to
+not be assigned a layout slot, therefore not draw anything on the output display. This can be useful for stateful Renders, which
+will have background tasks running that update the render's state meaning they can't simply be loaded when the user requests them
+since they would be missing important temporal context.
+
+<details>
+  <summary><code>GET</code> <code><b>/render/active</b></code> <code>(Returns the active renders current loaded)</code></summary>
+
+##### Overview
+
+Returns a list of loaded renders. These renders were successfully constructed via the `/factory/load/{factory_name}` endpoint. These
+renders may or may not be currently displaying on the canvas.
+
+##### Parameters
+
+> None
+
+##### Request Body
+
+> None
+
+##### Responses
+
+> | http code | content-type       | response  |
+> | --------- | ------------------ | --------- |
+> | `200`     | `application/json` | See Below |
+
+##### Response Body
+
+> ```json
+> [
+>   {
+>     "id": "UUID Serialize String",
+>     "factory_name": "String",
+>     "layout_slot": null or int
+>   },
+>   ...
+> ]
+> ```
+
+##### Example cURL
+
+> ```bash
+>  curl -X GET http://localhost:8080/render/active
+> ```
+
+</details>
+
+<details>
+  <summary><code>DELETE</code> <code><b>/render/{render_id}</b></code> <code>(Unloads a render instance from memory)</code></summary>
+
+##### Overview
+
+Unloads and removes a render instance. If the render was selected for a layout, the render will also be removed from that layout.
+
+##### Parameters
+
+> | name        | type     | data type | description                                        |
+> | ----------- | -------- | --------- | -------------------------------------------------- |
+> | `render_id` | required | string    | The unique id provided when the render was created |
+
+##### Request Body
+
+> None
+
+##### Responses
+
+> | http code | content-type | response |
+> | --------- | ------------ | -------- |
+> | `204`     | None         | None     |
+> | `404`     | None         | None     |
+
+##### Example cURL
+
+> ```bash
+>  curl -X DELETE http://localhost:8080/render/{render_id}
+> ```
+
+</details>
+
+### Factory API
+
+Render Factories are compiled into the executable and are immutable. A caller can determine what factories are included in the program
+by using the `/factory/discover` call. Their job is to read the configuration provided and construct a render that represents the
+provided configuration parameters. Since each factory is different, the configuration schema will change from factory to factory. Because
+of this, factories must also tell the caller the schema of the configuration they wish the user to provide them. This is accomplished in
+the `/factory/details/{factory_name}` call. There may me multiple instances of renders that were created by the same Render Factory. Once
+the render is crated, the Factory no longer plays a role it its lifetime management and the caller must use the [Render API](#render-api)
+to interact with it.
+
+<details>
+  <summary><code>GET</code> <code><b>/factory/discover</b></code> <code>(Returns all available Render Factories)</code></summary>
+
+##### Overview
+
+Returns a list of Render Factories that are served by this instance. Factories are compiled into the software executable and can not be
+added after the compilation of the program.
+
+##### Parameters
+
+> None
+
+##### Request Body
+
+> None
+
+##### Responses
+
+> | http code | content-type       | response  |
+> | --------- | ------------------ | --------- |
+> | `200`     | `application/json` | See Below |
+
+##### Response Body
+
+> ```json
+> [
+>   {
+>     "name": "String",
+>     "description": "String",
+>   },
+>   ...
+> ]
+> ```
+
+##### Example cURL
+
+> ```bash
+>  curl -X GET http://localhost:8080/factory/discover
+> ```
+
+</details>
+
+<details>
+  <summary><code>GET</code> <code><b>/factory/details/{factory_name}</b></code> <code>(Returns details about a specific render factory)</code></summary>
+
+##### Overview
+
+Returns a list of details about a specific render factory. The returned object will contain the Render Factory's configuration schema.
+
+##### Parameters
+
+> None
+
+##### Request Body
+
+> None
+
+##### Responses
+
+> | http code | content-type       | response  |
+> | --------- | ------------------ | --------- |
+> | `200`     | `application/json` | See Below |
+> | `404`     | None               | None      |
+
+##### Response Body
+
+> ```json
+> [
+>   {
+>     "name": "String",
+>     "description": "String",
+>   },
+>   ...
+> ]
+> ```
+
+##### Example cURL
+
+> ```bash
+>  curl -X GET http://localhost:8080/factory/details/{factory_name}
+> ```
+
+</details>
+
+<details>
+  <summary><code>POST</code> <code><b>/factory/load/{factory_name}</b></code> <code>(Loads the render produced by the factory into memory)</code></summary>
+
+##### Overview
+
+Attempts to load a Render using a Render Factory. The configuration must match the schema returned in the `/factory/details/{factory_name}` endpoint.
+
+##### Parameters
+
+> | name           | type     | data type | description                                              |
+> | -------------- | -------- | --------- | -------------------------------------------------------- |
+> | `factory_name` | required | string    | The name of the factory described in the `discover` call |
+
+##### Request Body
+
+> Must be a serialized JSON object. The render factory will parse it and attempt to build the associated
+> render.
+
+##### Responses
+
+> | http code | content-type       | response                                                        |
+> | --------- | ------------------ | --------------------------------------------------------------- |
+> | `200`     | `application/json` | `{id: "Serialized UUID"}`                                       |
+> | `400`     | `application/json` | `{"description":"Render was not loaded","cause":"Bad Request"}` |
+> | `404`     | None               | None                                                            |
+
+##### Example cURL
+
+> ```bash
+>  curl -X POST -H "Content-Type: application/json" --data '{"station": "Downingtown"}' http://localhost:8080/factory/load/{render_name}
+> ```
+
+</details>
+
+### Layout API
+
+Layouts allow multiple renders to output on the save LED Matrix Panel. Currently layouts are mutually exclusive, meaning that renders
+can not draw overtop of each other. It is possible for the same Render instance to hold multiple layout slots.
+
+<details>
+  <summary><code>GET</code> <code><b>/layout/discover</b></code> <code>(Returns the supported layout configurations)</code></summary>
+
+##### Overview
+
+Returns a list of layout configurations that are supported by this instance.
+
+##### Parameters
+
+> None
+
+##### Request Body
+
+> None
+
+##### Responses
+
+> | http code | content-type       | response  |
+> | --------- | ------------------ | --------- |
+> | `200`     | `application/json` | See Below |
+
+##### Response Body
+
+> ```json
+> [
+>   {
+>     name: "String",
+>     items: integer,
+>   }
+> ]
+> ```
+
+##### Example cURL
+
+> ```bash
+>  curl -X GET http://localhost:8080/layout/discover
+> ```
+
+</details>
+
+<details>
+  <summary><code>GET</code> <code><b>/layout/active</b></code> <code>(Returns the active layout and associated renders)</code></summary>
+
+##### Overview
+
+Returns the active layout and which render (if any) is occupying each layout slot.
+
+##### Parameters
+
+> None
+
+##### Request Body
+
+> None
+
+##### Responses
+
+> | http code | content-type       | response  |
+> | --------- | ------------------ | --------- |
+> | `200`     | `application/json` | See Below |
+
+##### Response Body
+
+> ```json
+> {
+>   "name": "String",
+>   "slots": [
+>     {
+>       "id": "UUID Serialize String",
+>       "factory_name": "String"
+>     },
+>     {
+>       "id": "UUID Serialize String",
+>       "factory_name": "String"
+>     },
+>     null,
+>     null
+>   ]
+> }
+> ```
+
+##### Example cURL
+
+> ```bash
+>  curl -X GET http://localhost:8080/layout/active
+> ```
+
+</details>
+
+<details>
+  <summary><code>POST</code> <code><b>/layout/config/{layout_config}</b></code> <code>(Configures the layout into a new configuration)</code></summary>
+</details>
+
+<details>
+  <summary><code>POST</code> <code><b>/layout/select/{layout_slot}</b></code> <code>(Configures a render to draw in a layout slot)</code></summary>
+</details>
+
+<details>
+  <summary><code>POST</code> <code><b>/layout/clear/{layout_slot}</b></code> <code>(Removes the current render in the layout slot)</code></summary>
+</details>
+
 ## Authors
 
 Stefan Bossbaly

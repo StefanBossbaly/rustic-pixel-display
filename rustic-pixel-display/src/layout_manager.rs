@@ -200,6 +200,10 @@ where
         self.layouts.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn layout(&self) -> LayoutType {
         self.layout_type
     }

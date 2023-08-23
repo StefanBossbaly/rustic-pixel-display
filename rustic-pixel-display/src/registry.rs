@@ -85,7 +85,7 @@ where
 
         let uuid = Uuid::new_v4();
         render_entries.insert(
-            uuid.clone(),
+            uuid,
             RenderEntry {
                 render,
                 factory_name: factory_name.to_owned(),
@@ -95,7 +95,7 @@ where
         Ok(uuid)
     }
 
-    pub fn unload(&mut self, uuid: &Uuid) -> Result<(), RegistryError> {
+    pub fn unload(&mut self, uuid: Uuid) -> Result<(), RegistryError> {
         let Self {
             render_entries,
             selected,
@@ -103,18 +103,18 @@ where
         } = self;
 
         if let Some(selected_uuid) = selected {
-            if selected_uuid == uuid {
+            if selected_uuid == &uuid {
                 *selected = None;
             }
         }
 
-        match render_entries.remove(uuid) {
+        match render_entries.remove(&uuid) {
             Some(_) => Ok(()),
-            None => Err(RegistryError::RenderNotFound(uuid.clone())),
+            None => Err(RegistryError::RenderNotFound(uuid)),
         }
     }
 
-    pub fn select(&mut self, uuid: &Uuid) -> Result<(), RegistryError> {
+    pub fn select(&mut self, uuid: Uuid) -> Result<(), RegistryError> {
         let Self {
             render_entries,
             selected,
@@ -122,9 +122,9 @@ where
         } = self;
 
         if !render_entries.contains_key(&uuid) {
-            Err(RegistryError::RenderNotFound(uuid.clone()))
+            Err(RegistryError::RenderNotFound(uuid))
         } else {
-            *selected = Some(uuid.clone());
+            *selected = Some(uuid);
             Ok(())
         }
     }

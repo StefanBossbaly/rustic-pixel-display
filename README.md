@@ -179,10 +179,10 @@ Unloads and removes a render instance. If the render was selected for a layout, 
 
 ##### Responses
 
-> | http code | content-type       | response                                                        |
-> | --------- | ------------------ | --------------------------------------------------------------- |
-> | `204`     | None               | None                                                            |
-> | `400`     | `application/json` | `{"description":"Render was not loaded","cause":"Bad Request"}` |
+> | http code | content-type | response |
+> | --------- | ------------ | -------- |
+> | `204`     | None         | None     |
+> | `404`     | None         | None     |
 
 ##### Example cURL
 

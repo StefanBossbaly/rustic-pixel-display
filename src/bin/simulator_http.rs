@@ -8,9 +8,7 @@ use embedded_graphics_simulator::{
     OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
 use parking_lot::Mutex;
-use rustic_pixel_display::{
-    factory_registry::FactoryRegistry, http_server::build_api_server, render::Render,
-};
+use rustic_pixel_display::{http_server::build_api_server, registry::Registry, render::Render};
 use rustic_pixel_display_macros::RenderFactories;
 use rustic_pixel_examples::renders::{
     person_tracker::TransitTrackerFactory, upcoming_arrivals::UpcomingArrivalsFactory,
@@ -46,8 +44,8 @@ async fn main() -> Result<()> {
     // Create the factory registry. This will house all the registered RenderFactories that can
     // be used to construct renders.
     let factory_registry = {
-        let factory_registry: FactoryRegistry<RenderFactoryEntries<SimulatorDisplay<_>>, _> =
-            FactoryRegistry::new(RenderFactoryEntries::factories());
+        let factory_registry: Registry<RenderFactoryEntries<SimulatorDisplay<_>>, _> =
+            Registry::new(RenderFactoryEntries::factories());
         Arc::new(Mutex::new(factory_registry))
     };
 

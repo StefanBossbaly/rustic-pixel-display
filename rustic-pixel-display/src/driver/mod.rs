@@ -1,16 +1,10 @@
-use crate::{
-    config::HardwareConfig,
-    http_server::build_api_server,
-    registry::Registry,
-    render::{Render, RenderFactory},
-};
+use crate::{config::HardwareConfig, render::Render};
 use anyhow::{anyhow, Result};
 use embedded_graphics::{
     pixelcolor::Rgb888,
     prelude::{DrawTarget, RgbColor},
 };
 use log::{debug, warn};
-use parking_lot::Mutex;
 use std::{
     convert::Infallible,
     sync::{
@@ -21,7 +15,9 @@ use std::{
     thread,
     time::Duration,
 };
-use tokio::runtime::Handle;
+
+#[cfg(feature = "http_server")]
+use crate::{http_server::build_api_server, registry::Registry, render::RenderFactory};
 
 mod cpp_driver;
 mod rust_driver;
@@ -134,11 +130,14 @@ impl MatrixDriver {
         })
     }
 
-    pub fn with_register<H, F>(
-        registry: Arc<Mutex<Registry<F, H::Canvas>>>,
+    #[cfg(feature = "http_server")]
+    pub fn with_register<H, A, F>(
+        http_addr: A,
+        registry: Arc<parking_lot::Mutex<Registry<F, H::Canvas>>>,
         config: HardwareConfig,
     ) -> Result<Self>
     where
+        A: std::net::ToSocketAddrs + Send + 'static,
         H: HardwareDriver,
         F: RenderFactory<H::Canvas> + Send + Sync + 'static,
     {
@@ -214,10 +213,10 @@ impl MatrixDriver {
         });
 
         // Get the handle to the created Tokio Runtime
-        let handle = Handle::current();
+        let handle = tokio::runtime::Handle::current();
 
         let http_thread_handle = thread::spawn(move || -> Result<()> {
-            let server = build_api_server("0.0.0.0:8080", handle, http_registry);
+            let server = build_api_server(http_addr, handle, http_registry);
 
             while alive_http.load(Ordering::SeqCst) {
                 server.poll();

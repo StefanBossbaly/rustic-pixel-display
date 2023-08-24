@@ -22,6 +22,8 @@ enum RenderFactoryEntries<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
+
     // Use the Rust Driver
     type DriverType = RustHardwareDriver;
     type CanvasType = <RustHardwareDriver as HardwareDriver>::Canvas;
@@ -34,7 +36,8 @@ async fn main() -> Result<()> {
         Arc::new(Mutex::new(factory_registry))
     };
 
-    let _led_driver = driver::MatrixDriver::with_register::<DriverType, _>(
+    let _led_driver = driver::MatrixDriver::with_register::<DriverType, _, _>(
+        "0.0.0.0:8080",
         factory_registry,
         HardwareConfig {
             hardware_mapping: HardwareMapping::Regular,

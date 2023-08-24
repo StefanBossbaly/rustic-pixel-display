@@ -5,9 +5,13 @@ use parking_lot::Mutex;
 use rouille::{input::json::JsonError, router, try_or_400, try_or_404, Request, Response, Server};
 use serde::Serialize;
 use tokio::runtime::Handle;
+use try_or_400::ErrJson;
 use uuid::Uuid;
 
-use crate::{registry::Registry, render::RenderFactory};
+use crate::{
+    registry::{Registry, RegistryError},
+    render::RenderFactory,
+};
 
 fn json_input_to_reader(request: &Request) -> Result<impl Read + '_, JsonError> {
     if let Some(header) = request.header("Content-Type") {
@@ -118,7 +122,16 @@ where
                 let json_reader = try_or_400!(json_input_to_reader(request));
 
                 // Attempt to load the render into the registry
-                let uuid = try_or_400!(registry_unlock.load(&render_name, json_reader));
+                let uuid = match registry_unlock.load(&render_name, json_reader) {
+                    Ok(uuid) => uuid,
+                    Err(e) => match e {
+                        RegistryError::FactoryNotFound(_) => return Response::empty_404(),
+                        _ => {
+                            let json_error = ErrJson::from_err(&e);
+                            return Response::json(&json_error).with_status_code(400);
+                        }
+                    }
+                };
 
                 Response::json(&LoadResponse {
                     id: uuid.to_string()

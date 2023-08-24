@@ -11,7 +11,7 @@ use septa_api::types::RegionalRailStop;
 async fn main() -> Result<()> {
     env_logger::init();
 
-    let _led_driver = driver::MatrixDriver::new::<RustHardwareDriver, _>(
+    let _led_driver = driver::MatrixDriver::with_single_render::<RustHardwareDriver, _>(
         UpcomingArrivals::new(UpcomingArrivalsConfig {
             station: RegionalRailStop::SuburbanStation,
             results: Some(20),
@@ -34,7 +34,6 @@ async fn main() -> Result<()> {
             row_setter: RowAddressSetterType::Direct,
             led_sequence: LedSequence::Bgr,
         },
-        None,
     )?;
 
     tokio::select! {

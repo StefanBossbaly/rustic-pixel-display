@@ -1,13 +1,16 @@
 use crate::{
-    config::{HardwareConfig, RxEvent, TxEvent},
-    render::Render,
+    config::HardwareConfig,
+    http_server::build_api_server,
+    registry::Registry,
+    render::{Render, RenderFactory},
 };
 use anyhow::{anyhow, Result};
 use embedded_graphics::{
     pixelcolor::Rgb888,
     prelude::{DrawTarget, RgbColor},
 };
-use log::{debug, info, warn};
+use log::{debug, warn};
+use parking_lot::Mutex;
 use std::{
     convert::Infallible,
     sync::{
@@ -18,6 +21,7 @@ use std::{
     thread,
     time::Duration,
 };
+use tokio::runtime::Handle;
 
 mod cpp_driver;
 mod rust_driver;
@@ -45,17 +49,13 @@ pub struct MatrixDriver {
 
     /// Handle to the driver thread
     driver_thread_handle: Option<thread::JoinHandle<Result<()>>>,
+
+    /// Handle to the HTTP thread (if any)
+    http_thread_handle: Option<thread::JoinHandle<Result<()>>>,
 }
 
 impl MatrixDriver {
-    pub fn new<H, R>(
-        render: R,
-        config: HardwareConfig,
-        event_sender_receiver: Option<(
-            std::sync::mpsc::Sender<TxEvent>,
-            std::sync::mpsc::Receiver<RxEvent>,
-        )>,
-    ) -> Result<Self>
+    pub fn with_single_render<H, R>(render: R, config: HardwareConfig) -> Result<Self>
     where
         H: HardwareDriver,
         R: Render<H::Canvas> + Sync + Send + 'static,
@@ -95,13 +95,7 @@ impl MatrixDriver {
         let driver_thread_handle = thread::spawn(move || -> Result<()> {
             debug!("Started LED Matrix driver thread");
 
-            let (event_sender, event_receiver) = match event_sender_receiver {
-                Some((sender, receiver)) => (Some(sender), Some(receiver)),
-                None => (None, None),
-            };
-
             // Convert into RGBMatrixConfig
-            let hardware_config_clone = config.clone();
             let hardware_config = config
                 .try_into()
                 .map_err(|_e| anyhow!("Can't convert to RGBMatrixConfig"))?;
@@ -110,44 +104,7 @@ impl MatrixDriver {
             let canvas = hardware_driver.create_canvas();
             driver_to_render_sender.send(canvas)?;
 
-            // Send the new configuration
-            if let Some(sender) = &event_sender {
-                sender.send(TxEvent::UpdateMatrixConfig(hardware_config_clone))?;
-            }
-
             while alive_driver.load(Ordering::SeqCst) {
-                // Only process events if provided with a receiver by the caller
-                if let Some(event_receiver) = &event_receiver {
-                    match event_receiver.try_recv() {
-                        Ok(rx_event) => match rx_event {
-                            RxEvent::UpdateMatrixConfig(rx_config) => {
-                                info!("Updating config: {:#?}", rx_config);
-
-                                let rx_config_clone = rx_config.clone();
-
-                                let driver_config = rx_config
-                                    .try_into()
-                                    .map_err(|_e| anyhow!("Can't convert to RGBMatrixConfig"))?;
-
-                                hardware_driver = H::new(driver_config)?;
-
-                                driver_to_render_sender.send(hardware_driver.create_canvas())?;
-
-                                // Send the new configuration
-                                if let Some(sender) = &event_sender {
-                                    sender.send(TxEvent::UpdateMatrixConfig(rx_config_clone))?;
-                                }
-                            }
-                        },
-                        Err(error) => match error {
-                            std::sync::mpsc::TryRecvError::Disconnected => {
-                                return Err(anyhow!("Disconnected from event bus"));
-                            }
-                            std::sync::mpsc::TryRecvError::Empty => {}
-                        },
-                    }
-                }
-
                 //let timeout = Duration::from_millis((1000.0 / framerate as f64) as u64);
                 let timeout = Duration::from_millis(30);
 
@@ -173,6 +130,107 @@ impl MatrixDriver {
             alive,
             render_thread_handle: Some(render_thread_handle),
             driver_thread_handle: Some(driver_thread_handle),
+            http_thread_handle: None,
+        })
+    }
+
+    pub fn with_register<H, F>(
+        registry: Arc<Mutex<Registry<F, H::Canvas>>>,
+        config: HardwareConfig,
+    ) -> Result<Self>
+    where
+        H: HardwareDriver,
+        F: RenderFactory<H::Canvas> + Send + Sync + 'static,
+    {
+        let alive = Arc::new(AtomicBool::new(true));
+
+        // Clone variable that will be moved into the thread
+        let alive_render = alive.clone();
+        let alive_driver = alive.clone();
+        let alive_http = alive.clone();
+
+        // Clone variable will be move onto the respective threads
+        let render_registry = registry.clone();
+        let http_registry = registry;
+
+        // Channels used to send the canvas between the render and driver threads
+        let (driver_to_render_sender, driver_to_render_receiver) =
+            std::sync::mpsc::channel::<Box<H::Canvas>>();
+        let (render_to_driver_sender, render_to_driver_receiver) =
+            std::sync::mpsc::channel::<Box<H::Canvas>>();
+
+        // Create the render thread
+        let render_thread_handle = thread::spawn(move || -> Result<()> {
+            debug!("Started render thread");
+            while alive_render.load(Ordering::SeqCst) {
+                match driver_to_render_receiver.recv() {
+                    Ok(mut canvas) => {
+                        canvas.clear(Rgb888::BLACK)?;
+                        render_registry.lock().render(canvas.as_mut())?;
+                        render_to_driver_sender.send(canvas)?;
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                }
+            }
+
+            Ok(())
+        });
+
+        // Create the driver thread
+        let driver_thread_handle = thread::spawn(move || -> Result<()> {
+            debug!("Started LED Matrix driver thread");
+
+            // Convert into RGBMatrixConfig
+            let hardware_config = config
+                .try_into()
+                .map_err(|_e| anyhow!("Can't convert to RGBMatrixConfig"))?;
+
+            let mut hardware_driver = H::new(hardware_config)?;
+            let canvas = hardware_driver.create_canvas();
+            driver_to_render_sender.send(canvas)?;
+
+            while alive_driver.load(Ordering::SeqCst) {
+                //let timeout = Duration::from_millis((1000.0 / framerate as f64) as u64);
+                let timeout = Duration::from_millis(30);
+
+                match render_to_driver_receiver.recv_timeout(timeout) {
+                    Ok(canvas) => {
+                        let canvas_new = hardware_driver.display_canvas(canvas);
+                        driver_to_render_sender.send(canvas_new)?;
+                    }
+                    Err(RecvTimeoutError::Disconnected) => {
+                        break;
+                    }
+                    Err(RecvTimeoutError::Timeout) => {
+                        warn!("Timeout waiting for frame from render");
+                        continue;
+                    }
+                }
+            }
+
+            Ok(())
+        });
+
+        // Get the handle to the created Tokio Runtime
+        let handle = Handle::current();
+
+        let http_thread_handle = thread::spawn(move || -> Result<()> {
+            let server = build_api_server("0.0.0.0:8080", handle, http_registry);
+
+            while alive_http.load(Ordering::SeqCst) {
+                server.poll();
+            }
+
+            Ok(())
+        });
+
+        Ok(Self {
+            alive,
+            render_thread_handle: Some(render_thread_handle),
+            driver_thread_handle: Some(driver_thread_handle),
+            http_thread_handle: Some(http_thread_handle),
         })
     }
 }
@@ -183,6 +241,7 @@ impl Drop for MatrixDriver {
             alive,
             render_thread_handle,
             driver_thread_handle,
+            http_thread_handle,
             ..
         } = self;
 
@@ -201,6 +260,13 @@ impl Drop for MatrixDriver {
                 .join()
                 .expect("Failed to join the driver thread")
                 .expect("Driver thread encountered an error");
+        }
+
+        if let Some(http_handle) = http_thread_handle.take() {
+            http_handle
+                .join()
+                .expect("Failed to join the http thread")
+                .expect("HTTP thread encountered an error");
         }
     }
 }

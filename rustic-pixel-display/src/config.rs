@@ -1,16 +1,6 @@
 use serde::{Deserialize, Serialize};
 use strum_macros::{AsRefStr, EnumString};
 
-#[derive(Debug, Clone)]
-pub enum RxEvent {
-    UpdateMatrixConfig(HardwareConfig),
-}
-
-#[derive(Debug, Clone)]
-pub enum TxEvent {
-    UpdateMatrixConfig(HardwareConfig),
-}
-
 #[derive(Clone, Serialize, Deserialize, Debug, EnumString, AsRefStr)]
 #[strum(serialize_all = "PascalCase", ascii_case_insensitive)]
 pub enum HardwareMapping {

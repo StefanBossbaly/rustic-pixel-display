@@ -49,3 +49,6 @@ name = "simulator_http"
 
 [[bin]]
 name = "rpi"
+
+[[bin]]
+name = "rpi_http"

@@ -122,8 +122,9 @@ since they would be missing important temporal context.
 
 ##### Overview
 
-Returns a list of loaded renders. These renders were successfully constructed via the `/factory/load/{factory_name}` endpoint. These
-renders may or may not be currently displaying on the canvas.
+Returns a list of loaded renders. These renders were successfully constructed via the `/factory/load/{factory_name}` endpoint and are
+considered active. Active means that the render may have background thread/tasks running that can be used to keep track of the render
+state, refresh backend API, etc. An active render might may or may not be currently displaying on the canvas.
 
 ##### Parameters
 
@@ -165,7 +166,9 @@ renders may or may not be currently displaying on the canvas.
 
 ##### Overview
 
-Unloads and removes a render instance. If the render was selected for a layout, the render will also be removed from that layout.
+Unloads and removes a render instance from the display (if applicable). Unloading a render instance will stop all background
+threads/tasks and remove it from the layout. This operation is final, once a render is unloaded it must be recreated by providing
+the same configuration to the `RenderFactory` that was used to create it.
 
 ##### Parameters
 
@@ -207,8 +210,8 @@ to interact with it.
 
 ##### Overview
 
-Returns a list of Render Factories that are served by this instance. Factories are compiled into the software executable and can not be
-added after the compilation of the program.
+Returns a list of RenderFactories that are served by this HTTP instance. Factories are compiled into the software executable and can not
+be added after the compilation of the program.
 
 ##### Parameters
 
@@ -245,7 +248,7 @@ added after the compilation of the program.
 </details>
 
 <details>
-  <summary><code>GET</code> <code><b>/factory/details/{factory_name}</b></code> <code>(Returns details about a specific render factory)</code></summary>
+  <summary><code>GET</code> <code><b>/factory/details/{factory_name}</b></code> <code>(Returns details about a specific render factory)(Under Construction)</code></summary>
 
 ##### Overview
 
@@ -291,24 +294,27 @@ Returns a list of details about a specific render factory. The returned object w
 
 ##### Overview
 
-Attempts to load a Render using a Render Factory. The configuration must match the schema returned in the `/factory/details/{factory_name}` endpoint.
+Attempts to create a `Render` instance using the provided `RenderFactory`. The configuration must match the schema returned in the
+`/factory/details/{factory_name}` endpoint. Once created, the `Render` must be referenced by using the UUID returned by this
+function.
 
 ##### Parameters
 
-> | name           | type     | data type | description                                              |
-> | -------------- | -------- | --------- | -------------------------------------------------------- |
-> | `factory_name` | required | string    | The name of the factory described in the `discover` call |
+> | name           | type     | data type | description                                                       |
+> | -------------- | -------- | --------- | ----------------------------------------------------------------- |
+> | `factory_name` | required | string    | The name of the factory described in the `/factory/discover` call |
 
 ##### Request Body
 
-> Must be a serialized JSON object. The render factory will parse it and attempt to build the associated
-> render.
+> Must be a serialized JSON object that matches the JSON schema specified by `/factory/details/{factory_name}` endpoint.
+> The `RenderFactory` will parse it and attempt to build the associated render. This operation can fail and the `RenderFactory`
+> will attempt to give a detailed error message so that the caller can attempt to fix the configuration.
 
 ##### Responses
 
 > | http code | content-type       | response                                                        |
 > | --------- | ------------------ | --------------------------------------------------------------- |
-> | `200`     | `application/json` | `{id: "Serialized UUID"}`                                       |
+> | `200`     | `application/json` | `{id: "Serialized UUID of created Render instance"}`            |
 > | `400`     | `application/json` | `{"description":"Render was not loaded","cause":"Bad Request"}` |
 > | `404`     | None               | None                                                            |
 
@@ -320,7 +326,7 @@ Attempts to load a Render using a Render Factory. The configuration must match t
 
 </details>
 
-### Layout API
+### Layout API (Under Construction)
 
 Layouts allow multiple renders to output on the save LED Matrix Panel. Currently layouts are mutually exclusive, meaning that renders
 can not draw overtop of each other. It is possible for the same Render instance to hold multiple layout slots.

@@ -15,7 +15,13 @@ to write their own renders.
 
 ## Example Photos
 
-![Train Arrivals](https://media.githubusercontent.com/media/StefanBossbaly/rustic-pixel-display/master/assets/train_arrivals.jpg)
+### Simulator displaying the UpcomingArrivals render showing both SEPTA and Amtrak trains for 30th Street Station
+
+![Train Arrivals](assets/train-arrivals-simulator.png)
+
+### Raspberry Pi displaying an early version of the UpcomingArrivals render
+
+![Train Arrivals](assets/train_arrivals.jpg)
 
 # Raspberry Pi
 

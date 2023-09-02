@@ -163,9 +163,12 @@ impl UpcomingArrivals {
 }
 
 const SEPTA_IMAGE: &[u8] = include_bytes!("../../../assets/SEPTA_16.bmp");
+const AMTRAK_IMAGE: &[u8] = include_bytes!("../../../assets/AMTRAK_16.bmp");
 
 lazy_static! {
     static ref SEPTA_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(SEPTA_IMAGE).unwrap();
+    static ref AMTRAK_BMP: Bmp::<'static, Rgb888> =
+        Bmp::<Rgb888>::from_slice(AMTRAK_IMAGE).unwrap();
 }
 
 type UpcomingArrivalViews<'a, C> = chain! {
@@ -203,11 +206,13 @@ where
 
         // Generate the title layout
         let title_layout = LinearLayout::horizontal(
-            Chain::new(Image::new(&*SEPTA_BMP, Point::zero())).append(Text::new(
-                &station_name,
-                Point::zero(),
-                MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
-            )),
+            Chain::new(Image::new(&*SEPTA_BMP, Point::zero()))
+                .append(Image::new(&*AMTRAK_BMP, Point::zero()))
+                .append(Text::new(
+                    &station_name,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
+                )),
         )
         .with_alignment(vertical::Center)
         .with_spacing(spacing::FixedMargin(6))

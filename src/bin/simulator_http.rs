@@ -38,6 +38,8 @@ enum RenderFactoryEntries<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
+
     // Get the handle to the created Tokio Runtime
     let handle = Handle::current();
 

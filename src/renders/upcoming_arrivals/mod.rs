@@ -16,24 +16,59 @@ use embedded_layout::{
 };
 use embedded_layout::{layout::linear::spacing, prelude::Link};
 use embedded_layout_macros::ViewGroup;
-use log::{error, trace};
+use log::error;
 use parking_lot::Mutex;
 use rustic_pixel_display::render::{Render, RenderFactory};
-use septa_api::{requests::ArrivalsRequest, responses::Arrivals, types::RegionalRailStop};
+use septa_api::types::RegionalRailStop;
 use serde::Deserialize;
 use std::{convert::Infallible, io::Read, marker::PhantomData, sync::Arc, time::Duration};
 use tinybmp::Bmp;
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
+use weer_api::chrono::{DateTime, FixedOffset};
+
+use self::{amtrak_provider::AmtrakProvider, septa_provider::SeptaProvider};
+
+mod amtrak_provider;
+mod septa_provider;
+
+#[derive(Debug, Clone, Copy)]
+enum UpcomingTrainStatus {
+    OnTime,
+    Early(u32),
+    Late(u32),
+    Unknown,
+}
+
+#[derive(Debug, Clone)]
+struct UpcomingTrain {
+    /// The time the train is scheduled to arrive in the station
+    schedule_arrival: DateTime<FixedOffset>,
+
+    /// The final destination of the train
+    destination_name: String,
+
+    /// The unique identifier of the train
+    train_id: String,
+
+    /// The amount of time, in mins, that the train is late from its scheduled time. A negative value
+    /// indicates the train is that many mins early.
+    status: UpcomingTrainStatus,
+}
 
 #[derive(Debug, Default)]
 struct UpcomingTrainsState {
-    arrivals: Vec<Arrivals>,
+    septa_arrivals: Vec<UpcomingTrain>,
+
+    amtrak_arrivals: Vec<UpcomingTrain>,
+
+    combined_arrivals: Vec<UpcomingTrain>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpcomingArrivalsConfig {
-    pub station: RegionalRailStop,
+    pub septa_station: RegionalRailStop,
+    pub amtrak_station: Option<String>,
     pub results: Option<u8>,
 }
 
@@ -50,57 +85,64 @@ pub struct UpcomingArrivals {
     update_task_handle: Option<JoinHandle<Result<()>>>,
 }
 
-const SEPTA_IMAGE: &[u8] = include_bytes!("../../assets/SEPTA_16.bmp");
-
-lazy_static! {
-    static ref SEPTA_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(SEPTA_IMAGE).unwrap();
-}
-
 impl UpcomingArrivals {
     pub fn new(config: UpcomingArrivalsConfig) -> Self {
-        let septa_api = septa_api::Client::new();
-
+        let station = config.septa_station.clone();
         let state = Arc::new(Mutex::new(UpcomingTrainsState::default()));
         let cancel_token = CancellationToken::new();
 
         let task_cancel_token = cancel_token.clone();
         let task_state = state.clone();
-        let task_station = config.station.clone();
-        let task_results = config.results;
 
         let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
+            let septa_client = SeptaProvider::new(config.septa_station);
+
+            let amtrak_client = config.amtrak_station.map(AmtrakProvider::new);
+
             loop {
                 let refresh_time = tokio::time::Instant::now() + Duration::from_secs(60);
 
-                match septa_api
-                    .arrivals(ArrivalsRequest {
-                        station: task_station.clone(),
-                        results: task_results,
-                        direction: None,
-                    })
-                    .await
-                {
-                    Ok(response) => {
-                        trace!(
-                            "northbound: {:?}, southbound: {:?}",
-                            response.northbound,
-                            response.southbound
-                        );
-
-                        // Sort the arrivals
-                        let mut arrivals = Vec::new();
-                        arrivals.extend(response.northbound.into_iter());
-                        arrivals.extend(response.southbound.into_iter());
-                        arrivals.sort_by(|a, b| a.sched_time.cmp(&b.sched_time));
-
-                        let mut state_unlocked = task_state.lock();
-                        state_unlocked.arrivals = arrivals
-                            .into_iter()
-                            .take((task_results.unwrap_or(3) * 2) as usize)
-                            .collect::<Vec<_>>();
+                let septa_arrivals = match septa_client.arrivals().await {
+                    Ok(response) => Some(response),
+                    Err(e) => {
+                        error!("Could not get updated SEPTA arrivals {e}");
+                        None
                     }
-                    Err(e) => error!("Could not get updated information {e}"),
-                }
+                };
+
+                let amtrak_arrivals = if let Some(amtrak_client) = &amtrak_client {
+                    match amtrak_client.arrivals().await {
+                        Ok(response) => Some(response),
+                        Err(e) => {
+                            error!("Could not get updated Amtrak arrivals {e}");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                {
+                    let mut state_unlocked = task_state.lock();
+
+                    if let Some(septa_arrivals) = septa_arrivals {
+                        state_unlocked.septa_arrivals = septa_arrivals;
+                    }
+
+                    if let Some(amtrak_arrivals) = amtrak_arrivals {
+                        state_unlocked.amtrak_arrivals = amtrak_arrivals;
+                    }
+
+                    let mut arrivals = state_unlocked
+                        .septa_arrivals
+                        .iter()
+                        .cloned()
+                        .chain(state_unlocked.amtrak_arrivals.iter().cloned())
+                        .collect::<Vec<_>>();
+                    arrivals.sort_by(|a, b| a.schedule_arrival.cmp(&b.schedule_arrival));
+
+                    state_unlocked.combined_arrivals = arrivals;
+                } // drop(state_unlocked)
 
                 select! {
                     _ = tokio::time::sleep_until(refresh_time) => {},
@@ -113,11 +155,17 @@ impl UpcomingArrivals {
 
         Self {
             state,
-            station: config.station,
+            station,
             cancel_token,
             update_task_handle: Some(update_task_handle),
         }
     }
+}
+
+const SEPTA_IMAGE: &[u8] = include_bytes!("../../../assets/SEPTA_16.bmp");
+
+lazy_static! {
+    static ref SEPTA_BMP: Bmp::<'static, Rgb888> = Bmp::<Rgb888>::from_slice(SEPTA_IMAGE).unwrap();
 }
 
 type UpcomingArrivalViews<'a, C> = chain! {
@@ -149,7 +197,6 @@ where
 {
     fn render(&self, canvas: &mut D) -> Result<(), D::Error> {
         let station_name = self.station.to_string();
-        let state_unlocked = self.state.lock();
 
         let canvas_bounding_box = canvas.bounding_box();
         let mut remaining_height = canvas_bounding_box.size.height;
@@ -170,18 +217,34 @@ where
 
         let mut arrival_layouts = Vec::new();
 
-        let format_strings = state_unlocked
-            .arrivals
+        let display_items = self
+            .state
+            .lock()
+            .combined_arrivals
             .iter()
             .map(|arrival| {
                 (
-                    arrival.sched_time.format("%_H:%M").to_string(),
-                    arrival.destination.to_string(),
+                    arrival.schedule_arrival.format("%_H:%M").to_string(),
+                    format!("{:<8}", arrival.train_id),
+                    format!("{:<20}", arrival.destination_name),
+                    match arrival.status {
+                        UpcomingTrainStatus::OnTime => "On Time".to_string(),
+                        UpcomingTrainStatus::Early(mins) => format!("{} mins early", mins),
+                        UpcomingTrainStatus::Late(mins) => format!("{} mins late", mins),
+                        UpcomingTrainStatus::Unknown => "N/A".to_string(),
+                    },
+                    match arrival.status {
+                        UpcomingTrainStatus::OnTime | UpcomingTrainStatus::Early(_) => {
+                            Rgb888::GREEN
+                        }
+                        UpcomingTrainStatus::Late(_) => Rgb888::RED,
+                        UpcomingTrainStatus::Unknown => Rgb888::WHITE,
+                    },
                 )
             })
             .collect::<Vec<_>>();
 
-        if state_unlocked.arrivals.is_empty() {
+        if display_items.is_empty() {
             arrival_layouts.push(LayoutView::NoArrival(
                 LinearLayout::horizontal(Chain::new(Text::new(
                     "No upcoming arrivals",
@@ -193,31 +256,28 @@ where
                 .arrange(),
             ));
         } else {
-            for (index, train) in state_unlocked.arrivals.iter().enumerate() {
-                let text_color = match train.status.as_str() {
-                    "On Time" => Rgb888::GREEN,
-                    _ => Rgb888::RED,
-                };
+            for display_item in &display_items {
+                let (time, train_id, destination_name, status, status_color) = display_item;
 
                 let chain = Chain::new(Text::new(
-                    &format_strings[index].0,
+                    time,
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
                 ))
                 .append(Text::new(
-                    &format_strings[index].1,
+                    train_id,
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
                 ))
                 .append(Text::new(
-                    &train.train_id,
+                    destination_name,
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
                 ))
                 .append(Text::new(
-                    train.status.as_str(),
+                    status,
                     Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, text_color),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, *status_color),
                 ));
 
                 let chain_height = chain.bounds().size.height;
@@ -289,7 +349,7 @@ where
     }
 
     fn render_description(&self) -> &'static str {
-        "Upcoming train arrivals for SEPTA regional rail"
+        "Upcoming train arrivals for SEPTA regional rail and Amtrak"
     }
 
     fn load_from_config<R: Read>(&self, reader: R) -> Result<Box<dyn Render<D>>> {

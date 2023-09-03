@@ -57,10 +57,10 @@ async fn main() -> Result<()> {
             ),
         })),
         Commands::UpcomingArrivals => Box::new(UpcomingArrivals::new(UpcomingArrivalsConfig {
-            septa_station: septa_api::types::RegionalRailStop::SuburbanStation,
+            septa_station: Some(septa_api::types::RegionalRailStop::SuburbanStation),
             amtrak_station: None,
             results: Some(20),
-        })),
+        })?),
         Commands::PersonTracker => {
             let hass_url: String = var("HASS_URL")
                 .expect("Pleases set HASS_URL to the url of the home assistant instance");

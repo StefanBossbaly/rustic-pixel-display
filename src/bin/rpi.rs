@@ -13,10 +13,10 @@ async fn main() -> Result<()> {
 
     let _led_driver = driver::MatrixDriver::with_single_render::<RustHardwareDriver, _>(
         UpcomingArrivals::new(UpcomingArrivalsConfig {
-            septa_station: RegionalRailStop::SuburbanStation,
+            septa_station: Some(RegionalRailStop::SuburbanStation),
             amtrak_station: None,
             results: Some(20),
-        }),
+        })?,
         HardwareConfig {
             hardware_mapping: HardwareMapping::Regular,
             rows: 64,

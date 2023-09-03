@@ -1,9 +1,10 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use chrono::{DateTime, FixedOffset};
 use embedded_graphics::{
     image::Image,
     mono_font::{self, MonoTextStyle},
     pixelcolor::Rgb888,
-    prelude::{DrawTarget, PixelColor, Point, RgbColor},
+    prelude::{DrawTarget, ImageDrawable, PixelColor, Point, RgbColor},
     text::Text,
     Drawable,
 };
@@ -25,7 +26,6 @@ use std::{convert::Infallible, io::Read, marker::PhantomData, sync::Arc, time::D
 use tinybmp::Bmp;
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
-use weer_api::chrono::{DateTime, FixedOffset};
 
 use self::{amtrak_provider::AmtrakProvider, septa_provider::SeptaProvider};
 
@@ -67,47 +67,68 @@ struct UpcomingTrainsState {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpcomingArrivalsConfig {
-    pub septa_station: RegionalRailStop,
+    pub septa_station: Option<RegionalRailStop>,
     pub amtrak_station: Option<String>,
     pub results: Option<u8>,
 }
 
 pub struct UpcomingArrivals {
-    state: Arc<Mutex<UpcomingTrainsState>>,
+    /// The name of the train stop
+    station_name: String,
 
-    /// The regional rail stop
-    station: RegionalRailStop,
+    /// If the station has SEPTA transit information
+    is_septa_stop: bool,
+
+    /// If the station has Amtrak transit information
+    is_amtrak_stop: bool,
 
     /// Flag used to gracefully terminate the render and driver threads
     cancel_token: CancellationToken,
+
+    /// Shared state between the render and the async task
+    state: Arc<Mutex<UpcomingTrainsState>>,
 
     /// Handle to the task used to update the SEPTA information
     update_task_handle: Option<JoinHandle<Result<()>>>,
 }
 
 impl UpcomingArrivals {
-    pub fn new(config: UpcomingArrivalsConfig) -> Self {
-        let station = config.septa_station.clone();
+    pub fn new(config: UpcomingArrivalsConfig) -> Result<Self> {
+        // Derive the station name from either the SEPTA or Amtrak location, giving preference to SEPTA.
+        let station_name = match (&config.septa_station, &config.amtrak_station) {
+            (None, Some(amtrak_station)) => amtrak_station.clone(),
+            (Some(septa_station), None) | (Some(septa_station), Some(_)) => {
+                septa_station.to_string()
+            }
+            (None, None) => return Err(anyhow!("Need to provide at least one Station")),
+        };
+
         let state = Arc::new(Mutex::new(UpcomingTrainsState::default()));
         let cancel_token = CancellationToken::new();
+
+        let is_septa_stop = config.septa_station.is_some();
+        let is_amtrak_stop = config.amtrak_station.is_some();
 
         let task_cancel_token = cancel_token.clone();
         let task_state = state.clone();
 
         let update_task_handle: JoinHandle<Result<()>> = tokio::task::spawn(async move {
-            let septa_client = SeptaProvider::new(config.septa_station);
-
+            let septa_client = config.septa_station.map(SeptaProvider::new);
             let amtrak_client = config.amtrak_station.map(AmtrakProvider::new);
 
             loop {
                 let refresh_time = tokio::time::Instant::now() + Duration::from_secs(60);
 
-                let septa_arrivals = match septa_client.arrivals().await {
-                    Ok(response) => Some(response),
-                    Err(e) => {
-                        error!("Could not get updated SEPTA arrivals {e}");
-                        None
+                let septa_arrivals = if let Some(septa_client) = &septa_client {
+                    match septa_client.arrivals().await {
+                        Ok(response) => Some(response),
+                        Err(e) => {
+                            error!("Could not get updated SEPTA arrivals {e}");
+                            None
+                        }
                     }
+                } else {
+                    None
                 };
 
                 let amtrak_arrivals = if let Some(amtrak_client) = &amtrak_client {
@@ -153,12 +174,14 @@ impl UpcomingArrivals {
             Ok(())
         });
 
-        Self {
+        Ok(Self {
             state,
-            station,
+            station_name,
+            is_septa_stop,
+            is_amtrak_stop,
             cancel_token,
             update_task_handle: Some(update_task_handle),
-        }
+        })
     }
 }
 
@@ -177,6 +200,12 @@ type UpcomingArrivalViews<'a, C> = chain! {
     Text<'a, MonoTextStyle<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>
 };
+
+#[derive(ViewGroup)]
+enum TitleView<'a, C: PixelColor, T: ImageDrawable<Color = C>> {
+    LogoView(Image<'a, T>),
+    TextView(Text<'a, MonoTextStyle<'static, C>>),
+}
 
 #[derive(ViewGroup)]
 enum LayoutView<'a, C: PixelColor> {
@@ -199,24 +228,29 @@ where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,
 {
     fn render(&self, canvas: &mut D) -> Result<(), D::Error> {
-        let station_name = self.station.to_string();
-
         let canvas_bounding_box = canvas.bounding_box();
         let mut remaining_height = canvas_bounding_box.size.height;
 
+        // Figure out which logos to display
+        let mut title_views = Vec::new();
+        if self.is_septa_stop {
+            title_views.push(TitleView::LogoView(Image::new(&*SEPTA_BMP, Point::zero())));
+        }
+        if self.is_amtrak_stop {
+            title_views.push(TitleView::LogoView(Image::new(&*AMTRAK_BMP, Point::zero())));
+        }
+
+        title_views.push(TitleView::TextView(Text::new(
+            &self.station_name,
+            Point::zero(),
+            MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
+        )));
+
         // Generate the title layout
-        let title_layout = LinearLayout::horizontal(
-            Chain::new(Image::new(&*SEPTA_BMP, Point::zero()))
-                .append(Image::new(&*AMTRAK_BMP, Point::zero()))
-                .append(Text::new(
-                    &station_name,
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_9X15, Rgb888::WHITE),
-                )),
-        )
-        .with_alignment(vertical::Center)
-        .with_spacing(spacing::FixedMargin(6))
-        .arrange();
+        let title_layout = LinearLayout::horizontal(Views::new(&mut title_views))
+            .with_alignment(vertical::Center)
+            .with_spacing(spacing::FixedMargin(2))
+            .arrange();
 
         remaining_height -= title_layout.bounds().size.height;
 
@@ -230,7 +264,7 @@ where
             .map(|arrival| {
                 (
                     arrival.schedule_arrival.format("%_H:%M").to_string(),
-                    format!("{:<8}", arrival.train_id),
+                    format!("{:<6}", arrival.train_id),
                     format!("{:<20}", arrival.destination_name),
                     match arrival.status {
                         UpcomingTrainStatus::OnTime => "On Time".to_string(),
@@ -359,6 +393,6 @@ where
 
     fn load_from_config<R: Read>(&self, reader: R) -> Result<Box<dyn Render<D>>> {
         let config: UpcomingArrivalsConfig = serde_json::from_reader(reader)?;
-        Ok(Box::new(UpcomingArrivals::new(config)))
+        Ok(Box::new(UpcomingArrivals::new(config)?))
     }
 }

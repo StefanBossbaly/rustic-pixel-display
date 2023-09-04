@@ -14,7 +14,7 @@ license = "GPL"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7.8"
 embedded-graphics = "0.8.1"
-embedded-layout-macros = { git = "https://github.com/bugadani/embedded-layout.git", branch = "master" }
+embedded-layout-macros = "0.2.1"
 embedded-layout = "0.3.2"
 serde = { version = "1.0.188", features = ["derive"] }
 strum = { version = "0.25", features = ["derive"] }
@@ -26,12 +26,11 @@ parking_lot = "0.12.1"
 tinybmp = "0.5.0"
 env_logger = "0.10.0"
 embedded-graphics-simulator = "0.5.0"
-rpi-led-panel = { git = "https://github.com/EmbersArc/rpi_led_panel.git", features = ["drawing", "embedded-graphics"] }
 weer_api = "0.1.1"
 rustic_pixel_display = { path = "rustic-pixel-display", features = ["http_server"] }
 rustic_pixel_display_macros = { path = "rustic-pixel-display/macros" }
 home-assistant-rest = "0.2.0"
-septa-api = { git = "https://github.com/StefanBossbaly/septa-api.git", branch = "master" }
+septa-api = "0.3.4"
 amtrak-api = { git = "https://github.com/StefanBossbaly/amtrak-api.git", branch = "master" }
 geoutils = "0.5.1"
 clap = { version= "4.4", features = ["derive"] }

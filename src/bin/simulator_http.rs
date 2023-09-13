@@ -1,7 +1,7 @@
 use anyhow::Result;
 use embedded_graphics::{
     pixelcolor::Rgb888,
-    prelude::{DrawTarget, Point, RgbColor, Size},
+    prelude::{DrawTarget, OriginDimensions, Point, RgbColor, Size},
     primitives::Rectangle,
 };
 use embedded_graphics_simulator::{
@@ -30,9 +30,7 @@ const DISPLAY_SIZE: Size = Size {
 };
 
 #[derive(RenderFactories)]
-enum RenderFactoryEntries<
-    D: DrawTarget<Color = Rgb888, Error = Infallible> + Send + Clone + 'static,
-> {
+enum RenderFactoryEntries<D: DrawTarget<Color = Rgb888, Error = Infallible> + OriginDimensions> {
     TransitTracker(TransitTrackerFactory<D>),
     UpcomingArrivals(UpcomingArrivalsFactory<D>),
     Weather(WeatherFactory<D>),

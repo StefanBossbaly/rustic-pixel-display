@@ -4,7 +4,7 @@ use embedded_graphics::{
     image::Image,
     mono_font::{self, MonoTextStyle},
     pixelcolor::Rgb888,
-    prelude::{DrawTarget, ImageDrawable, PixelColor, Point, RgbColor},
+    prelude::{DrawTarget, ImageDrawable, OriginDimensions, PixelColor, Point, RgbColor},
     text::Text,
     Drawable,
 };
@@ -19,7 +19,7 @@ use embedded_layout::{layout::linear::spacing, prelude::Link};
 use embedded_layout_macros::ViewGroup;
 use log::error;
 use parking_lot::Mutex;
-use rustic_pixel_display::render::{Render, RenderFactory};
+use rustic_pixel_display::render::{CachedCanvas, Render, RenderFactory};
 use septa_api::types::RegionalRailStop;
 use serde::Deserialize;
 use std::{convert::Infallible, io::Read, marker::PhantomData, sync::Arc, time::Duration};
@@ -56,8 +56,8 @@ struct UpcomingTrain {
     status: UpcomingTrainStatus,
 }
 
-#[derive(Debug)]
-struct UpcomingTrainsState<D> {
+#[derive(Debug, Default)]
+struct UpcomingTrainsState {
     septa_arrivals: Vec<UpcomingTrain>,
 
     amtrak_arrivals: Vec<UpcomingTrain>,
@@ -65,18 +65,7 @@ struct UpcomingTrainsState<D> {
     combined_arrivals: Vec<UpcomingTrain>,
 
     /// Cached canvas
-    cached_canvas: Option<D>,
-}
-
-impl<D> Default for UpcomingTrainsState<D> {
-    fn default() -> Self {
-        Self {
-            septa_arrivals: Vec::new(),
-            amtrak_arrivals: Vec::new(),
-            combined_arrivals: Vec::new(),
-            cached_canvas: None,
-        }
-    }
+    cached_canvas: Option<CachedCanvas>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -86,7 +75,7 @@ pub struct UpcomingArrivalsConfig {
     pub results: Option<u8>,
 }
 
-pub struct UpcomingArrivals<D> {
+pub struct UpcomingArrivals {
     /// The name of the train stop
     station_name: String,
 
@@ -100,16 +89,13 @@ pub struct UpcomingArrivals<D> {
     cancel_token: CancellationToken,
 
     /// Shared state between the render and the async task
-    state: Arc<Mutex<UpcomingTrainsState<D>>>,
+    state: Arc<Mutex<UpcomingTrainsState>>,
 
     /// Handle to the task used to update the SEPTA information
     update_task_handle: Option<JoinHandle<Result<()>>>,
 }
 
-impl<D> UpcomingArrivals<D>
-where
-    D: Send + 'static,
-{
+impl UpcomingArrivals {
     pub fn new(config: UpcomingArrivalsConfig) -> Result<Self> {
         // Derive the station name from either the SEPTA or Amtrak location, giving preference to SEPTA.
         let station_name = match (&config.septa_station, &config.amtrak_station) {
@@ -241,9 +227,9 @@ enum LayoutView<'a, C: PixelColor> {
     ),
 }
 
-impl<D> Render<D> for UpcomingArrivals<D>
+impl<D> Render<D> for UpcomingArrivals
 where
-    D: DrawTarget<Color = Rgb888, Error = Infallible> + Clone,
+    D: DrawTarget<Color = Rgb888, Error = Infallible> + OriginDimensions,
 {
     fn render(&self, canvas: &mut D) -> Result<(), D::Error> {
         let canvas_bounding_box = canvas.bounding_box();
@@ -252,12 +238,13 @@ where
         {
             let state_unlocked = self.state.lock();
             if let Some(cached_canvas) = &state_unlocked.cached_canvas {
-                *canvas = cached_canvas.clone();
+                cached_canvas.render(canvas)?;
                 return Ok(());
             }
         } //drop(state_unlocked)
 
         // Figure out which logos to display
+        let mut cached_canvas = CachedCanvas::new(canvas.size());
         let mut title_views = Vec::new();
         if self.is_septa_stop {
             title_views.push(TitleView::LogoView(Image::new(&*SEPTA_BMP, Point::zero())));
@@ -372,18 +359,20 @@ where
         )
         .with_spacing(spacing::FixedMargin(2))
         .arrange()
-        .draw(canvas)?;
+        .draw(&mut cached_canvas)?;
+
+        cached_canvas.render(canvas)?;
 
         {
             let mut state_unlocked = self.state.lock();
-            state_unlocked.cached_canvas = Some(canvas.clone());
+            state_unlocked.cached_canvas = Some(cached_canvas);
         } //drop(state_unlocked)
 
         Ok(())
     }
 }
 
-impl<D> Drop for UpcomingArrivals<D> {
+impl Drop for UpcomingArrivals {
     fn drop(&mut self) {
         self.cancel_token.cancel();
 
@@ -413,7 +402,7 @@ where
 
 impl<D> RenderFactory<D> for UpcomingArrivalsFactory<D>
 where
-    D: DrawTarget<Color = Rgb888, Error = Infallible> + Send + Clone + 'static,
+    D: DrawTarget<Color = Rgb888, Error = Infallible> + OriginDimensions,
 {
     fn render_name(&self) -> &'static str {
         "UpcomingArrivals"

@@ -14,7 +14,9 @@ use rustic_pixel_examples::renders::{
 use std::{convert::Infallible, sync::Arc, vec};
 
 #[derive(RenderFactories)]
-enum RenderFactoryEntries<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
+enum RenderFactoryEntries<
+    D: DrawTarget<Color = Rgb888, Error = Infallible> + Clone + Send + 'static,
+> {
     TransitTracker(TransitTrackerFactory<D>),
     UpcomingArrivals(UpcomingArrivalsFactory<D>),
     Weather(WeatherFactory<D>),
@@ -51,7 +53,7 @@ async fn main() -> Result<()> {
             interlaced: false,
             dither_bits: 0,
             chain_length: 2,
-            parallel: 1,
+            parallel: 2,
             panel_type: None,
             multiplexing: None,
             row_setter: RowAddressSetterType::Direct,

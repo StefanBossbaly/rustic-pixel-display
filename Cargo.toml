@@ -9,7 +9,6 @@ repository = "https://github.com/StefanBossbaly/rustic-pixel-display"
 authors = ["Stefan Bossbaly <sbossb@gmail.com>"]
 license = "GPL"
 
-
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7.8"
@@ -31,7 +30,7 @@ rustic_pixel_display = { path = "rustic-pixel-display", features = ["http_server
 rustic_pixel_display_macros = { path = "rustic-pixel-display/macros" }
 home-assistant-rest = "0.2.0"
 septa-api = "0.3.4"
-amtrak-api = { git = "https://github.com/StefanBossbaly/amtrak-api.git", branch = "master" }
+amtrak-api = "0.1.0"
 geoutils = "0.5.1"
 clap = { version= "4.4", features = ["derive"] }
 serde_json = "1.0.105"
@@ -52,3 +51,8 @@ name = "rpi"
 
 [[bin]]
 name = "rpi_http"
+
+[profile.release]
+debug = 1
+[rust]
+debuginfo-level = 1

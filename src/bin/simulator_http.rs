@@ -30,7 +30,9 @@ const DISPLAY_SIZE: Size = Size {
 };
 
 #[derive(RenderFactories)]
-enum RenderFactoryEntries<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
+enum RenderFactoryEntries<
+    D: DrawTarget<Color = Rgb888, Error = Infallible> + Send + Clone + 'static,
+> {
     TransitTracker(TransitTrackerFactory<D>),
     UpcomingArrivals(UpcomingArrivalsFactory<D>),
     Weather(WeatherFactory<D>),

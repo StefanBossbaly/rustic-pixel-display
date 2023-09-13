@@ -56,13 +56,27 @@ struct UpcomingTrain {
     status: UpcomingTrainStatus,
 }
 
-#[derive(Debug, Default)]
-struct UpcomingTrainsState {
+#[derive(Debug)]
+struct UpcomingTrainsState<D> {
     septa_arrivals: Vec<UpcomingTrain>,
 
     amtrak_arrivals: Vec<UpcomingTrain>,
 
     combined_arrivals: Vec<UpcomingTrain>,
+
+    /// Cached canvas
+    cached_canvas: Option<D>,
+}
+
+impl<D> Default for UpcomingTrainsState<D> {
+    fn default() -> Self {
+        Self {
+            septa_arrivals: Vec::new(),
+            amtrak_arrivals: Vec::new(),
+            combined_arrivals: Vec::new(),
+            cached_canvas: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -72,7 +86,7 @@ pub struct UpcomingArrivalsConfig {
     pub results: Option<u8>,
 }
 
-pub struct UpcomingArrivals {
+pub struct UpcomingArrivals<D> {
     /// The name of the train stop
     station_name: String,
 
@@ -86,13 +100,16 @@ pub struct UpcomingArrivals {
     cancel_token: CancellationToken,
 
     /// Shared state between the render and the async task
-    state: Arc<Mutex<UpcomingTrainsState>>,
+    state: Arc<Mutex<UpcomingTrainsState<D>>>,
 
     /// Handle to the task used to update the SEPTA information
     update_task_handle: Option<JoinHandle<Result<()>>>,
 }
 
-impl UpcomingArrivals {
+impl<D> UpcomingArrivals<D>
+where
+    D: Send + 'static,
+{
     pub fn new(config: UpcomingArrivalsConfig) -> Result<Self> {
         // Derive the station name from either the SEPTA or Amtrak location, giving preference to SEPTA.
         let station_name = match (&config.septa_station, &config.amtrak_station) {
@@ -163,6 +180,7 @@ impl UpcomingArrivals {
                     arrivals.sort_by(|a, b| a.schedule_arrival.cmp(&b.schedule_arrival));
 
                     state_unlocked.combined_arrivals = arrivals;
+                    state_unlocked.cached_canvas = None;
                 } // drop(state_unlocked)
 
                 select! {
@@ -223,13 +241,21 @@ enum LayoutView<'a, C: PixelColor> {
     ),
 }
 
-impl<D> Render<D> for UpcomingArrivals
+impl<D> Render<D> for UpcomingArrivals<D>
 where
-    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+    D: DrawTarget<Color = Rgb888, Error = Infallible> + Clone,
 {
     fn render(&self, canvas: &mut D) -> Result<(), D::Error> {
         let canvas_bounding_box = canvas.bounding_box();
         let mut remaining_height = canvas_bounding_box.size.height;
+
+        {
+            let state_unlocked = self.state.lock();
+            if let Some(cached_canvas) = &state_unlocked.cached_canvas {
+                *canvas = cached_canvas.clone();
+                return Ok(());
+            }
+        } //drop(state_unlocked)
 
         // Figure out which logos to display
         let mut title_views = Vec::new();
@@ -253,8 +279,6 @@ where
             .arrange();
 
         remaining_height -= title_layout.bounds().size.height;
-
-        let mut arrival_layouts = Vec::new();
 
         let display_items = self
             .state
@@ -283,20 +307,10 @@ where
             })
             .collect::<Vec<_>>();
 
-        if display_items.is_empty() {
-            arrival_layouts.push(LayoutView::NoArrival(
-                LinearLayout::horizontal(Chain::new(Text::new(
-                    "No upcoming arrivals",
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
-                )))
-                .with_alignment(vertical::Center)
-                .with_spacing(spacing::FixedMargin(6))
-                .arrange(),
-            ));
-        } else {
-            for display_item in &display_items {
-                let (time, train_id, destination_name, status, status_color) = display_item;
+        let mut arrival_layouts = display_items
+            .iter()
+            .map_while(|display_item| {
+                let (time, train_id, destination_name, status, status_color) = &display_item;
 
                 let chain = Chain::new(Text::new(
                     time,
@@ -322,18 +336,31 @@ where
                 let chain_height = chain.bounds().size.height;
 
                 if remaining_height < chain_height {
-                    break;
+                    None
+                } else {
+                    remaining_height -= chain.bounds().size.height;
+
+                    Some(LayoutView::UpcomingArrival(
+                        LinearLayout::horizontal(chain)
+                            .with_alignment(vertical::Center)
+                            .with_spacing(spacing::FixedMargin(6))
+                            .arrange(),
+                    ))
                 }
+            })
+            .collect::<Vec<_>>();
 
-                remaining_height -= chain.bounds().size.height;
-
-                arrival_layouts.push(LayoutView::UpcomingArrival(
-                    LinearLayout::horizontal(chain)
-                        .with_alignment(vertical::Center)
-                        .with_spacing(spacing::FixedMargin(6))
-                        .arrange(),
-                ));
-            }
+        if arrival_layouts.is_empty() {
+            arrival_layouts.push(LayoutView::NoArrival(
+                LinearLayout::horizontal(Chain::new(Text::new(
+                    "No upcoming arrivals",
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
+                )))
+                .with_alignment(vertical::Center)
+                .with_spacing(spacing::FixedMargin(6))
+                .arrange(),
+            ));
         }
 
         LinearLayout::vertical(
@@ -347,11 +374,16 @@ where
         .arrange()
         .draw(canvas)?;
 
+        {
+            let mut state_unlocked = self.state.lock();
+            state_unlocked.cached_canvas = Some(canvas.clone());
+        } //drop(state_unlocked)
+
         Ok(())
     }
 }
 
-impl Drop for UpcomingArrivals {
+impl<D> Drop for UpcomingArrivals<D> {
     fn drop(&mut self) {
         self.cancel_token.cancel();
 
@@ -381,7 +413,7 @@ where
 
 impl<D> RenderFactory<D> for UpcomingArrivalsFactory<D>
 where
-    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+    D: DrawTarget<Color = Rgb888, Error = Infallible> + Send + Clone + 'static,
 {
     fn render_name(&self) -> &'static str {
         "UpcomingArrivals"

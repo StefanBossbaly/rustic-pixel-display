@@ -80,7 +80,7 @@ where
         let pixels = self
             .pixels
             .clone()
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(offset, color)| Pixel(self.convert_offset_to_point(offset).unwrap(), *color))
             .collect::<Vec<_>>();

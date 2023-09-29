@@ -4,7 +4,7 @@ use embedded_graphics::{
     image::Image,
     mono_font::{self, MonoTextStyle},
     pixelcolor::Rgb888,
-    prelude::{DrawTarget, ImageDrawable, PixelColor, Point, RgbColor},
+    prelude::{DrawTarget, ImageDrawable, OriginDimensions, PixelColor, Point, RgbColor},
     text::Text,
     Drawable,
 };
@@ -19,7 +19,7 @@ use embedded_layout::{layout::linear::spacing, prelude::Link};
 use embedded_layout_macros::ViewGroup;
 use log::error;
 use parking_lot::Mutex;
-use rustic_pixel_display::render::{Render, RenderFactory};
+use rustic_pixel_display::render::{CachedCanvas, Render, RenderFactory};
 use septa_api::types::RegionalRailStop;
 use serde::Deserialize;
 use std::{convert::Infallible, io::Read, marker::PhantomData, sync::Arc, time::Duration};
@@ -63,6 +63,9 @@ struct UpcomingTrainsState {
     amtrak_arrivals: Vec<UpcomingTrain>,
 
     combined_arrivals: Vec<UpcomingTrain>,
+
+    /// Cached canvas
+    cached_canvas: Option<CachedCanvas>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -163,6 +166,7 @@ impl UpcomingArrivals {
                     arrivals.sort_by(|a, b| a.schedule_arrival.cmp(&b.schedule_arrival));
 
                     state_unlocked.combined_arrivals = arrivals;
+                    state_unlocked.cached_canvas = None;
                 } // drop(state_unlocked)
 
                 select! {
@@ -225,13 +229,22 @@ enum LayoutView<'a, C: PixelColor> {
 
 impl<D> Render<D> for UpcomingArrivals
 where
-    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+    D: DrawTarget<Color = Rgb888, Error = Infallible> + OriginDimensions,
 {
     fn render(&self, canvas: &mut D) -> Result<(), D::Error> {
         let canvas_bounding_box = canvas.bounding_box();
         let mut remaining_height = canvas_bounding_box.size.height;
 
+        {
+            let state_unlocked = self.state.lock();
+            if let Some(cached_canvas) = &state_unlocked.cached_canvas {
+                cached_canvas.render(canvas)?;
+                return Ok(());
+            }
+        } //drop(state_unlocked)
+
         // Figure out which logos to display
+        let mut cached_canvas = CachedCanvas::new(canvas.size());
         let mut title_views = Vec::new();
         if self.is_septa_stop {
             title_views.push(TitleView::LogoView(Image::new(&*SEPTA_BMP, Point::zero())));
@@ -253,8 +266,6 @@ where
             .arrange();
 
         remaining_height -= title_layout.bounds().size.height;
-
-        let mut arrival_layouts = Vec::new();
 
         let display_items = self
             .state
@@ -283,20 +294,10 @@ where
             })
             .collect::<Vec<_>>();
 
-        if display_items.is_empty() {
-            arrival_layouts.push(LayoutView::NoArrival(
-                LinearLayout::horizontal(Chain::new(Text::new(
-                    "No upcoming arrivals",
-                    Point::zero(),
-                    MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
-                )))
-                .with_alignment(vertical::Center)
-                .with_spacing(spacing::FixedMargin(6))
-                .arrange(),
-            ));
-        } else {
-            for display_item in &display_items {
-                let (time, train_id, destination_name, status, status_color) = display_item;
+        let mut arrival_layouts = display_items
+            .iter()
+            .map_while(|display_item| {
+                let (time, train_id, destination_name, status, status_color) = &display_item;
 
                 let chain = Chain::new(Text::new(
                     time,
@@ -322,18 +323,31 @@ where
                 let chain_height = chain.bounds().size.height;
 
                 if remaining_height < chain_height {
-                    break;
+                    None
+                } else {
+                    remaining_height -= chain.bounds().size.height;
+
+                    Some(LayoutView::UpcomingArrival(
+                        LinearLayout::horizontal(chain)
+                            .with_alignment(vertical::Center)
+                            .with_spacing(spacing::FixedMargin(6))
+                            .arrange(),
+                    ))
                 }
+            })
+            .collect::<Vec<_>>();
 
-                remaining_height -= chain.bounds().size.height;
-
-                arrival_layouts.push(LayoutView::UpcomingArrival(
-                    LinearLayout::horizontal(chain)
-                        .with_alignment(vertical::Center)
-                        .with_spacing(spacing::FixedMargin(6))
-                        .arrange(),
-                ));
-            }
+        if arrival_layouts.is_empty() {
+            arrival_layouts.push(LayoutView::NoArrival(
+                LinearLayout::horizontal(Chain::new(Text::new(
+                    "No upcoming arrivals",
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_6X9, Rgb888::WHITE),
+                )))
+                .with_alignment(vertical::Center)
+                .with_spacing(spacing::FixedMargin(6))
+                .arrange(),
+            ));
         }
 
         LinearLayout::vertical(
@@ -345,7 +359,14 @@ where
         )
         .with_spacing(spacing::FixedMargin(2))
         .arrange()
-        .draw(canvas)?;
+        .draw(&mut cached_canvas)?;
+
+        cached_canvas.render(canvas)?;
+
+        {
+            let mut state_unlocked = self.state.lock();
+            state_unlocked.cached_canvas = Some(cached_canvas);
+        } //drop(state_unlocked)
 
         Ok(())
     }
@@ -381,7 +402,7 @@ where
 
 impl<D> RenderFactory<D> for UpcomingArrivalsFactory<D>
 where
-    D: DrawTarget<Color = Rgb888, Error = Infallible>,
+    D: DrawTarget<Color = Rgb888, Error = Infallible> + OriginDimensions,
 {
     fn render_name(&self) -> &'static str {
         "UpcomingArrivals"

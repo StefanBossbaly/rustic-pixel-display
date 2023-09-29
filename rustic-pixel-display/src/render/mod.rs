@@ -2,8 +2,10 @@ use anyhow::Result;
 use embedded_graphics::{pixelcolor::Rgb888, prelude::DrawTarget};
 use std::{convert::Infallible, io::Read};
 
+mod cached_canvas;
 mod sub_canvas;
 
+pub use cached_canvas::CachedCanvas;
 pub use sub_canvas::SubCanvas;
 
 pub trait Render<D>

@@ -1,5 +1,8 @@
 use anyhow::Result;
-use embedded_graphics::{pixelcolor::Rgb888, prelude::DrawTarget};
+use embedded_graphics::{
+    pixelcolor::Rgb888,
+    prelude::{DrawTarget, OriginDimensions},
+};
 use parking_lot::Mutex;
 use rustic_pixel_display::{
     config::{HardwareConfig, HardwareMapping, LedSequence, RowAddressSetterType},
@@ -14,7 +17,7 @@ use rustic_pixel_examples::renders::{
 use std::{convert::Infallible, sync::Arc, vec};
 
 #[derive(RenderFactories)]
-enum RenderFactoryEntries<D: DrawTarget<Color = Rgb888, Error = Infallible>> {
+enum RenderFactoryEntries<D: DrawTarget<Color = Rgb888, Error = Infallible> + OriginDimensions> {
     TransitTracker(TransitTrackerFactory<D>),
     UpcomingArrivals(UpcomingArrivalsFactory<D>),
     Weather(WeatherFactory<D>),
@@ -51,7 +54,7 @@ async fn main() -> Result<()> {
             interlaced: false,
             dither_bits: 0,
             chain_length: 2,
-            parallel: 1,
+            parallel: 2,
             panel_type: None,
             multiplexing: None,
             row_setter: RowAddressSetterType::Direct,

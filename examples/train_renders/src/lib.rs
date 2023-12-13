@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate lazy_static;
+
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, FixedOffset};
 use embedded_graphics::{
@@ -19,7 +22,7 @@ use embedded_layout::{layout::linear::spacing, prelude::Link};
 use embedded_layout_macros::ViewGroup;
 use log::error;
 use parking_lot::Mutex;
-use rustic_pixel_display::render::{Render, RenderFactory};
+use rustic_pixel_display_sdk::render::{Render, RenderFactory};
 use septa_api::types::RegionalRailStop;
 use serde::Deserialize;
 use std::{convert::Infallible, io::Read, marker::PhantomData, sync::Arc, time::Duration};

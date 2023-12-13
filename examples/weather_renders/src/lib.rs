@@ -13,7 +13,7 @@ use embedded_layout::{
 };
 use log::error;
 use parking_lot::Mutex;
-use rustic_pixel_display::render::{Render, RenderFactory};
+use rustic_pixel_display_sdk::render::{Render, RenderFactory};
 use serde::Deserialize;
 use std::{
     convert::Infallible, io::Read, marker::PhantomData, net::IpAddr, sync::Arc, time::Duration,

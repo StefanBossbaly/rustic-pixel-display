@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate lazy_static;
+
 use anyhow::Result;
 use embedded_graphics::{
     mono_font::{self, MonoTextStyle},
@@ -12,7 +15,7 @@ use embedded_layout::{
     View,
 };
 use log::warn;
-use rustic_pixel_display::render::{Render, SubCanvas};
+use rustic_pixel_display_sdk::render::{Render, SubCanvas};
 use std::{collections::HashMap, convert::Infallible};
 
 mod home_assistant_tracker;
@@ -55,7 +58,8 @@ where
     fn provide_state(&self) -> Box<dyn State<D>>;
 }
 
-// Create a blanket impl for State<D> if struct implements both Usefulness + SubRender<D>
+// Create a blanket impl for State<D> if struct implements both Usefulness +
+// SubRender<D>
 impl<D, T> State<D> for T
 where
     D: DrawTarget<Color = Rgb888, Error = Infallible>,

@@ -16,7 +16,7 @@ use embedded_layout_macros::ViewGroup;
 use geoutils::{Distance, Location};
 use log::{debug, error};
 use parking_lot::Mutex;
-use rustic_pixel_display::render::{Render, RenderFactory, SubCanvas};
+use rustic_pixel_display_sdk::render::{Render, RenderFactory, SubCanvas};
 use septa_api::{responses::Train, types::RegionalRailStop};
 use serde::Deserialize;
 use std::{
@@ -34,7 +34,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::{State, StateProvider, SubRender, Usefulness};
 
-/// The amount of time the user has to be within the radius of a station to be considered at the station.
+/// The amount of time the user has to be within the radius of a station to be
+/// considered at the station.
 const NO_STATUS_TO_AT_STATION: Duration = Duration::from_secs(30);
 
 // Have to wrap in lazy_static since from_meters is not a const function.
@@ -43,8 +44,8 @@ lazy_static! {
     static ref AT_STATION_ENTER_RADIUS: Distance = Distance::from_meters(200.0);
 }
 
-/// The amount of time that a user would need to be outside a station's radius to
-/// transition from AtStation to NoStatus.
+/// The amount of time that a user would need to be outside a station's radius
+/// to transition from AtStation to NoStatus.
 const AT_STATION_TO_NO_STATUS_TIMEOUT: Duration = Duration::from_secs(60);
 
 // Have to wrap in lazy_static since from_meters is not a const function.
@@ -68,33 +69,38 @@ lazy_static! {
 
 #[derive(Debug, Default, Clone)]
 struct TrainEncounter {
-    /// The first time the user encountered the train inside the radius of the current station.
+    /// The first time the user encountered the train inside the radius of the
+    /// current station.
     first_encounter_inside_station: Option<Instant>,
 
-    /// The first time the user encountered the train outside the radius of the current station.
+    /// The first time the user encountered the train outside the radius of the
+    /// current station.
     first_encounter_outside_station: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]
 enum TransitState {
     NoStatus {
-        /// A map of the regional rail stop to the time the user entered into the radius of the station.
-        /// We use time::Instance since we need a monotonic clock and do not care about the system time.
+        /// A map of the regional rail stop to the time the user entered into
+        /// the radius of the station. We use time::Instance since we
+        /// need a monotonic clock and do not care about the system time.
         station_to_first_encounter: HashMap<RegionalRailStop, Instant>,
     },
     AtStation {
         /// The station the user is currently at.
         station: RegionalRailStop,
 
-        /// A map from the unique train id to the time the user encountered the train within the radius
-        /// of a station and the time the user encountered the train outside the radius of a station.
+        /// A map from the unique train id to the time the user encountered the
+        /// train within the radius of a station and the time the user
+        /// encountered the train outside the radius of a station.
         train_id_to_first_encounter: HashMap<String, TrainEncounter>,
 
         /// The time the user has been outside the radius of the station.
         time_outside_station: Option<Instant>,
     },
     OnTrain {
-        /// The train (wrap in Box to get rid of the clippy::large_enum_variant lint warning)
+        /// The train (wrap in Box to get rid of the clippy::large_enum_variant
+        /// lint warning)
         train: Box<Train>,
 
         /// The time the user has been on the train.
@@ -160,7 +166,8 @@ impl TransitState {
                     }
                 }
 
-                // Iterate over eligible stations, if there are more than one, pick the closest one
+                // Iterate over eligible stations, if there are more than one, pick the closest
+                // one
                 match eligible_stations.len() {
                     0 => TransitState::NoStatus {
                         station_to_first_encounter,
@@ -225,10 +232,12 @@ impl TransitState {
                     .is_in_circle(&station_location, *AT_STATION_LEAVE_RADIUS)
                     .map_err(|e| anyhow!("distance_to failed: {}", e))?
                 {
-                    // We are still at the station, so update the time we have been outside the station
+                    // We are still at the station, so update the time we have been outside the
+                    // station
                     time_outside_station = None;
                 } else {
-                    // We are no longer at the station, so update the time we have been outside the station
+                    // We are no longer at the station, so update the time we have been outside the
+                    // station
                     match time_outside_station {
                         Some(first_left) => {
                             if now - first_left > AT_STATION_TO_NO_STATUS_TIMEOUT {
@@ -274,7 +283,8 @@ impl TransitState {
                                                 .or(Some(now));
                                     }
 
-                                    // We have to have at least one encounter inside the station and one outside the station
+                                    // We have to have at least one encounter inside the station and
+                                    // one outside the station
                                     // TODO: Have some sort of time component to this transition
                                     if train_encounters.first_encounter_inside_station.is_some()
                                         && train_encounters

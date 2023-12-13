@@ -1,0 +1,14 @@
+[package]
+name = "rustic_pixel_display_sdk"
+version = "0.1.0"
+edition = "2021"
+description = "SDK to write renders for Rustic Pixel Display"
+keywords = ["rgb", "matrix", "pixel", "display", "sdk"]
+repository = "https://github.com/StefanBossbaly/rustic-pixel-display"
+authors = ["Stefan Bossbaly <sbossb@gmail.com>"]
+license = "GPL"
+
+[dependencies]
+anyhow = "1.0.75"
+embedded-graphics = "0.8.1"
+

@@ -15,7 +15,7 @@ use embedded_layout::{
 use home_assistant_rest::get::StateEnum;
 use log::warn;
 use parking_lot::Mutex;
-use rustic_pixel_display::render::SubCanvas;
+use rustic_pixel_display_sdk::render::SubCanvas;
 use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc, time::Duration};
 use tinybmp::Bmp;

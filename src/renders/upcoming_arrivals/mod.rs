@@ -40,6 +40,12 @@ enum UpcomingTrainStatus {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum UpcomingTrainDirection {
+    Arrival,
+    Departure,
+}
+
 #[derive(Debug, Clone)]
 struct UpcomingTrain {
     /// The time the train is scheduled to arrive in the station
@@ -48,11 +54,13 @@ struct UpcomingTrain {
     /// The final destination of the train
     destination_name: String,
 
+    direction: UpcomingTrainDirection,
+
     /// The unique identifier of the train
     train_id: String,
 
-    /// The amount of time, in mins, that the train is late from its scheduled time. A negative value
-    /// indicates the train is that many mins early.
+    /// The amount of time, in mins, that the train is late from its scheduled
+    /// time. A negative value indicates the train is that many mins early.
     status: UpcomingTrainStatus,
 }
 
@@ -94,7 +102,8 @@ pub struct UpcomingArrivals {
 
 impl UpcomingArrivals {
     pub fn new(config: UpcomingArrivalsConfig) -> Result<Self> {
-        // Derive the station name from either the SEPTA or Amtrak location, giving preference to SEPTA.
+        // Derive the station name from either the SEPTA or Amtrak location, giving
+        // preference to SEPTA.
         let station_name = match (&config.septa_station, &config.amtrak_station) {
             (None, Some(amtrak_station)) => amtrak_station.clone(),
             (Some(septa_station), None) | (Some(septa_station), Some(_)) => {
@@ -198,6 +207,7 @@ type UpcomingArrivalViews<'a, C> = chain! {
     Text<'a, MonoTextStyle<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>,
+    Text<'a, MonoTextStyle<'static, C>>,
     Text<'a, MonoTextStyle<'static, C>>
 };
 
@@ -264,7 +274,11 @@ where
             .map(|arrival| {
                 (
                     arrival.schedule_arrival.format("%_H:%M").to_string(),
-                    format!("{:<6}", arrival.train_id),
+                    format!("{:<7}", arrival.train_id),
+                    match arrival.direction {
+                        UpcomingTrainDirection::Arrival => "A".to_owned(),
+                        UpcomingTrainDirection::Departure => "D".to_owned(),
+                    },
                     format!("{:<20}", arrival.destination_name),
                     match arrival.status {
                         UpcomingTrainStatus::OnTime => "On Time".to_string(),
@@ -296,7 +310,8 @@ where
             ));
         } else {
             for display_item in &display_items {
-                let (time, train_id, destination_name, status, status_color) = display_item;
+                let (time, train_id, direction, destination_name, status, status_color) =
+                    display_item;
 
                 let chain = Chain::new(Text::new(
                     time,
@@ -305,6 +320,11 @@ where
                 ))
                 .append(Text::new(
                     train_id,
+                    Point::zero(),
+                    MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
+                ))
+                .append(Text::new(
+                    direction,
                     Point::zero(),
                     MonoTextStyle::new(&mono_font::ascii::FONT_5X7, Rgb888::WHITE),
                 ))

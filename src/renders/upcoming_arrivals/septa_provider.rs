@@ -51,6 +51,7 @@ impl TryFrom<Arrivals> for UpcomingTrain {
                 .and_local_timezone(FixedOffset::east_opt(-4 * 3600).unwrap())
                 .unwrap(),
             destination_name: value.destination.to_string(),
+            direction: super::UpcomingTrainDirection::Arrival,
             train_id: value.train_id,
             status: if value.status == "On Time" {
                 UpcomingTrainStatus::OnTime

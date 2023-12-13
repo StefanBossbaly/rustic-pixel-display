@@ -28,8 +28,8 @@ async fn main() -> Result<()> {
     type DriverType = RustHardwareDriver;
     type CanvasType = <RustHardwareDriver as HardwareDriver>::Canvas;
 
-    // Create the factory registry. This will house all the registered RenderFactories that can
-    // be used to construct renders.
+    // Create the factory registry. This will house all the registered
+    // RenderFactories that can be used to construct renders.
     let factory_registry = {
         let factory_registry: Registry<RenderFactoryEntries<CanvasType>, _> =
             Registry::new(RenderFactoryEntries::factories());
@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
             interlaced: false,
             dither_bits: 0,
             chain_length: 2,
-            parallel: 1,
+            parallel: 2,
             panel_type: None,
             multiplexing: None,
             row_setter: RowAddressSetterType::Direct,

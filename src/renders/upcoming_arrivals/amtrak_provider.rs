@@ -5,7 +5,7 @@ use amtrak_api::{
     Client,
 };
 
-use super::{UpcomingTrain, UpcomingTrainStatus};
+use super::{UpcomingTrain, UpcomingTrainDirection, UpcomingTrainStatus};
 
 pub(super) struct AmtrakProvider {
     station_code: String,
@@ -50,7 +50,16 @@ impl AmtrakProvider {
                 if let Some(station) = station {
                     Some(UpcomingTrain {
                         schedule_arrival: station.schedule_arrival,
-                        destination_name: train.destination_name,
+                        destination_name: if train.destination_code == self.station_code {
+                            train.origin_name
+                        } else {
+                            train.destination_name
+                        },
+                        direction: if train.destination_code == self.station_code {
+                            UpcomingTrainDirection::Arrival
+                        } else {
+                            UpcomingTrainDirection::Departure
+                        },
                         train_id: train.train_id,
                         status: match station.arrival {
                             None => super::UpcomingTrainStatus::Unknown,
